@@ -8,7 +8,8 @@ import (
 	"unicode"
 )
 
-// To keep the matrix an array instead of a slice, fill the largest possible matrix
+// To keep the matrix an array instead of a slice, its size must be const
+// I'll just fill the largest possible matrix, memory waste is negligible
 const maxNumberOfKeys = 29
 const maxBigramMatrixSize = maxNumberOfKeys * maxNumberOfKeys
 const minFileSize = 1024 // bytes
