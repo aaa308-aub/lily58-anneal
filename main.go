@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"unicode"
-
-	"github.com/aaa308-aub/lily58-anneal/parser"
 )
 
 type finger int
@@ -80,11 +78,4 @@ func main() {
 	for i := range targetSymbols {
 		targetSymbols[i] = unicode.ToLower(targetSymbols[i])
 	}
-
-	matrix, err := parser.FillBigramMatrix("./data.txt", targetSymbols)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("%v\n", matrix) // temporary
 }

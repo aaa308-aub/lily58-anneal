@@ -4,8 +4,7 @@ By default, the engine finds the best layout for my own left-hand only Lily58 to
 ## Default finger assignments
 ![](assets/images/lily58fingers.png)
 
-You'll notice almost immediately that the index finger is responsible for half the keyboard: 14 keys. My goal with the left-hand only Lily58 has always been to stop moving my right hand back and forth between a regular keyboard and mouse. I want my left hand always on the keyboard and my right hand always on the mouse, deliberately sacrificing typing speed for flow. Some English letters are very frequent when typing while others are scarce, and the engine takes advantage of that to push the less frequent characters like ``Z`` or ``Q`` away to the right-side edge, keeping the
-index finger comfortable.
+You'll notice almost immediately that the index finger is responsible for half the keyboard: 14 keys. My goal with the left-hand only Lily58 has always been to stop moving my right hand back and forth between a regular keyboard and mouse. I want my left hand always on the keyboard and my right hand always on the mouse, deliberately sacrificing typing speed for flow. Some English letters are very frequent when typing while others are scarce, and the engine takes advantage of that to push the less frequent characters like ``Z`` or ``Q`` away to the right-side edge, keeping the index finger comfortable.
 
 ## Key Distances from the Center
 These are the measurements I've made on an actual Lily58:
