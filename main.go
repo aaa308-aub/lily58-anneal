@@ -13,7 +13,7 @@ func main() {
 
 	keyConfig := config.KeyConfig
 	targetSymbols := config.TargetSymbols
-	langDataFile := config.TargetLanguageCode + ".tsv" // The same for all N-grams.
+	langDataFileName := config.TargetLanguageCode + ".tsv" // The same for all N-grams.
 
 	const numKeys, numSymbols = len(keyConfig), len(targetSymbols)
 
@@ -43,22 +43,32 @@ func main() {
 		targetSymbols[i] = unicode.ToLower(targetSymbols[i])
 	}
 
-	langDataPath := path.Join("assets", "counts", "monograms", langDataFile)
-	var monogramFreq [numSymbols]float32
-	err := assets.GetMonogramData(langDataPath, targetSymbols[:], monogramFreq[:])
+	langDataFilePath := path.Join("assets", "counts", "monograms", langDataFileName)
+	var monogramFreqs [numSymbols]float32
+	err := assets.GetMonogramData(langDataFilePath, targetSymbols[:], monogramFreqs[:])
 	if err != nil {
 		panic(fmt.Errorf(
 			"failed to parse monogram data: %w",
 			err,
 		))
 	}
-	for i, freq := range monogramFreq {
+	for i, freq := range monogramFreqs {
 		if freq == 0 {
 			panic(fmt.Errorf(
 				"found symbol (%q) with zero-frequency in monogram data (%q)",
 				targetSymbols[i],
-				langDataFile,
+				langDataFileName,
 			))
 		}
+	}
+
+	langDataFilePath = path.Join("assets", "counts", "bigrams", langDataFileName)
+	var bigramFreqs [numSymbols * numSymbols]float32
+	err = assets.GetBigramData(langDataFilePath, targetSymbols[:], bigramFreqs[:])
+	if err != nil {
+		panic(fmt.Errorf(
+			"failed to parse bigram data: %w",
+			err,
+		))
 	}
 }
