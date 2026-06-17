@@ -12,10 +12,15 @@ import (
 func main() {
 
 	keyConfig := config.KeyConfig
-	targetSymbols := config.TargetSymbols
 	langDataFileName := config.TargetLanguageCode + ".tsv" // The same for all N-grams.
-
-	const numKeys, numSymbols = len(keyConfig), len(targetSymbols)
+	const numKeys, numSymbols = len(keyConfig), len(config.TargetSymbols)
+	var targetSymbols = func() [numSymbols]rune {
+		var ts [numSymbols]rune
+		for i, symbol := range config.TargetSymbols {
+			ts[i] = symbol
+		}
+		return ts
+	}()
 
 	if numKeys < 2 || numKeys > 29 {
 		panic(fmt.Errorf(

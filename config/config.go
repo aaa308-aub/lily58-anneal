@@ -16,11 +16,14 @@ type keyInfo struct {
 
 // Do not touch above this line unless you know what you're doing.
 //
-// Note: the key with coordinates 4x, -0.58y (see images in doc) is considered Row 5, Column 5 for simplicity.
+// Note: the key with coordinates 4x, -0.58y (see images in doc) is considered
+// Row 5, Column 5 for simplicity.
 //
-// To exclude a key (as in make the engine ignore it), assign it to FingerNil. To re-include it, assign it to a valid finger.
+// To exclude a key (as in make the engine ignore it), assign it to FingerNil.
+// To re-include it, assign it to a valid finger.
 //
-// If you want to adjust a key's weight, change its 3rd field. For example, the weight of {0, 2, 1.5, FingerMiddle} is 1.5.
+// If you want to adjust a key's weight, change its 3rd field. For example, the
+// weight of {0, 2, 1.5, FingerMiddle} is 1.5.
 //
 // Make sure the number of target symbols matches the number of included keys.
 
@@ -37,15 +40,12 @@ var KeyConfig = [...]keyInfo{
 	{0.5, -2, 2.5, FingerMiddle}, {1.5, -2, 2.5, FingerIndex}, {2.5, -2.08, 3, FingerNil}, {3.8, -2.09, 3.5, FingerNil}, {4, -0.58, 3.5, FingerIndex},
 }
 
-// Place your symbols to be mapped here.
-// If any of them is not in the alphabet of the language you chose below, it will result in an error.
+// Place your symbols to be mapped below.
+// If any of them is not in the alphabet of the language you chose below, it
+// will result in an error.
 
-var TargetSymbols = [...]rune{
-	'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-}
+const TargetSymbols = "abcdefghijklmnopqrstuvwxyz"
 
-// TODO: Find a way to keep TargetSymbols an array while allowing the user to type in a string rather than this.
-
-// For the available languages and their corresponding alphabets, see the README.
+// For the available languages and their alphabets, see the README.
 
 const TargetLanguageCode = "en"
