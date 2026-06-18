@@ -10,7 +10,6 @@ import (
 )
 
 func main() {
-
 	const numKeys, numSymbols = len(config.KeyConfig), len(config.TargetSymbols)
 	const numKeysIncluded = config.NumKeysIncluded
 
@@ -64,9 +63,8 @@ func main() {
 	for i, freq := range monogramFreqs {
 		if freq == 0 {
 			panic(fmt.Errorf(
-				"found symbol (%q) with zero-frequency in monogram data (%q)",
+				"found symbol (%q) with no monogram data, may not belong to language",
 				targetSymbols[i],
-				langDataFileName,
 			))
 		}
 	}
@@ -81,20 +79,33 @@ func main() {
 		))
 	}
 
+	type trigramInfo = assets.TrigramInfo
 	langDataFilePath = path.Join("assets", "counts", "trigrams", langDataFileName)
-	const numTopTrigrams = int8(100)
-	var trigramFreqs [numTopTrigrams]float32
-	var symbolToTrigramIndex [numSymbols * int(numTopTrigrams)]int8
+	const numTopTrigrams = 100
+	var trigramInfos [numTopTrigrams]trigramInfo
 	err = assets.GetTrigramData(
 		langDataFilePath,
 		targetSymbols[:],
-		trigramFreqs[:],
-		symbolToTrigramIndex[:],
+		trigramInfos[:],
 		numTopTrigrams,
 	)
 	if err != nil {
 		panic(fmt.Errorf(
 			"failed to parse trigram data: %w",
+			err,
+		))
+	}
+
+	var symbolToTrigramIndex [numSymbols * numTopTrigrams]int8
+	err = assets.MapSymbolsToTrigrams(
+		symbolToTrigramIndex[:],
+		trigramInfos[:],
+		numSymbols,
+		numTopTrigrams,
+	)
+	if err != nil {
+		panic(fmt.Errorf(
+			"failed to map symbols to trigrams: %w",
 			err,
 		))
 	}
