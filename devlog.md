@@ -58,7 +58,7 @@ runes encoded in ``UTF-8``.
 
 
 #4\
-N-gram data is required for solution proposed in #2.
+N-gram data is required for solution proposed in ``#2.``
 
 Data must be from large sample sizes, especially for trigrams, because there\
 are 26^3 = 17576 possible trigram combinations for English, and much more for\
@@ -146,3 +146,33 @@ example, if the symbols are ``abc``, the frequencies are stored like this:
 The simulated annealing algorithm swaps 2 random keys/symbols every step. If\
 they are ``a`` and ``c`` in this example, it will calculate the cost delta of\
 bigrams containing ``a`` and ``c`` only.
+
+#8\
+Trigram data must be stored and accessed efficiently.
+
+There are over 17500 possible trigram combinations for 26 or more symbols.\
+Tracking every trigram would be wasteful. To reward inward rolling with fingers\
+on trigrams, the order of symbols in a trigram must be known.
+
+Analyzed the data and saw that roughly 33.6% of English trigrams, in terms of\
+cumulative frequency, are concentrated in the top 100 trigrams. Fixed number of\
+top trigrams stored in data to 100 under the assumption that most languages\
+follow the same trend, and that more trigrams is too much noise to optimize for\
+any realistic one-handed keyboard layout. Implemented these data structures:
+```Go
+type TrigramInfo struct {
+	Freq                 float32
+	orderedSymbolIndices [3]int8
+}
+
+var trigramInfos [numTopTrigrams]trigramInfo // where numTopTrigrams = 100
+
+var symbolToTrigramIndex [numSymbols*numTopTrigrams]int8
+```
+``symbolToTrigramIndex`` is a flattened 2D matrix which takes the index of each\
+swapped symbol and returns a bucket of indices to the trigrams (or\
+``TrigramInfo``s) it belongs to, starting at offset ``numSymbols * symbolIndex``\
+and ending at ``offset + numTopTrigrams``. This cheap indexing maximizes\
+lookups but wastes some memory because the matrix is sparse. Rejected turning\
+it into a Compressed Sparse Matrix (CSF) because it would lead to pointer\
+chasing and/or\ more expensive indexing.

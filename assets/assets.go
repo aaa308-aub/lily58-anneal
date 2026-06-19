@@ -238,6 +238,10 @@ func GetTrigramData(
 		if !ok1 || !ok2 || !ok3 {
 			continue
 		}
+		// A trigram with non-distinct symbols is invalid and must be ignored.
+		if index1 == index2 || index1 == index3 || index2 == index3 {
+			continue
+		}
 
 		trigrams[countsIndex] = [3]int8{int8(index1), int8(index2), int8(index3)}
 		counts[countsIndex] = float32(count)
@@ -285,7 +289,7 @@ func MapSymbolsToTrigrams(
 
 	if len(trigramInfos) != numTrigrams {
 		return fmt.Errorf(
-			"length of trigramFreqs (%d) does not match number of numTrigrams (%d)",
+			"length of trigramInfos (%d) does not match number of numTrigrams (%d)",
 			len(trigramInfos),
 			numTrigrams,
 		)
