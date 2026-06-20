@@ -175,7 +175,7 @@ func GetBigramData(
 
 		index1, ok1 := symbolToIndex[runes[0]]
 		index2, ok2 := symbolToIndex[runes[1]]
-		if !ok1 || !ok2 {
+		if !ok1 || !ok2 || index1 == index2 { // Bigram symbols must be distinct.
 			continue
 		}
 
@@ -193,8 +193,8 @@ func GetBigramData(
 
 // The ordering is required by the engine. There's no way around this.
 type TrigramInfo struct {
-	Freq                 float32
-	orderedSymbolIndices [3]int8
+	Freq           float32
+	OrderedSymbols [3]int8
 }
 
 // Takes a trigram count data path, the target symbols, and a slice of
@@ -203,7 +203,7 @@ func GetTrigramData(
 	targetLanguagePath string,
 	targetSymbols []rune,
 	trigramInfos []TrigramInfo,
-	numTopTrigrams int8,
+	numTopTrigrams int,
 ) error {
 
 	file, err := openLanguageDataFile(targetLanguagePath)
@@ -221,7 +221,7 @@ func GetTrigramData(
 
 	trigrams := make([][3]int8, numTopTrigrams)
 	counts := make([]float32, numTopTrigrams)
-	countsIndex := int8(0) // lineNumber can't be used if some trigrams are skipped.
+	countsIndex := 0 // lineNumber can't be used if some trigrams are skipped.
 	scanner, lineNumber := bufio.NewScanner(file), 0
 	for scanner.Scan() && countsIndex < numTopTrigrams {
 		lineNumber++
@@ -262,7 +262,7 @@ func GetTrigramData(
 		return err
 	}
 
-	for i := int8(0); i < numTopTrigrams; i++ {
+	for i := 0; i < numTopTrigrams; i++ {
 		trigramInfos[i] = TrigramInfo{counts[i], trigrams[i]}
 	}
 
@@ -274,37 +274,22 @@ func GetTrigramData(
 //
 // The value -1 is used as a flag for empty slots.
 func MapSymbolsToTrigrams(
-	symbolToTrigramIndex []int8,
+	symbolToTrigrams []int8,
 	trigramInfos []TrigramInfo,
-	numSymbols, numTrigrams int,
+	numTrigrams int,
 ) error {
 
-	if len(symbolToTrigramIndex) != numSymbols*numTrigrams {
-		return fmt.Errorf(
-			"length of symbolToTrigramIndex is %d, expected %d",
-			len(symbolToTrigramIndex),
-			numSymbols*numTrigrams,
-		)
-	}
-
-	if len(trigramInfos) != numTrigrams {
-		return fmt.Errorf(
-			"length of trigramInfos (%d) does not match number of numTrigrams (%d)",
-			len(trigramInfos),
-			numTrigrams,
-		)
-	}
-
-	for i := range symbolToTrigramIndex {
-		symbolToTrigramIndex[i] = -1
+	// Each symbol's trigram-indices bucket ends with -1
+	for i := range symbolToTrigrams {
+		symbolToTrigrams[i] = -1
 	}
 
 	for i, trigram := range trigramInfos {
-		for _, symbolIndex := range trigram.orderedSymbolIndices {
-			offset := numSymbols * int(symbolIndex)
+		for _, symbolIndex := range trigram.OrderedSymbols {
+			offset := numTrigrams * int(symbolIndex)
 			for j := offset; j < offset+numTrigrams; j++ {
-				if symbolToTrigramIndex[j] == -1 {
-					symbolToTrigramIndex[j] = int8(i)
+				if symbolToTrigrams[j] == -1 {
+					symbolToTrigrams[j] = int8(i)
 					break
 				}
 			}

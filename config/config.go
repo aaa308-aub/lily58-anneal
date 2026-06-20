@@ -1,17 +1,38 @@
 package config
 
-type finger uint8
+const NumKeys = 29
+const NumTopTrigrams = 100
+const PenaltySFB = float32(3)
+const PenaltyStretch = float32(2)
+const RewardInwardRoll = float32(3)
+const RewardOutwardRoll = RewardInwardRoll / 3
+
+type Finger uint8
 
 const (
-	FingerNil    finger = iota // 0
-	FingerRing                 // 1
-	FingerMiddle               // 2
-	FingerIndex                // 3
+	FingerRing   Finger = iota // 0
+	FingerMiddle               // 1
+	FingerIndex                // 2
+	NumFingers                 // 3
+	FingerNil                  // 4
+	// Typically the null-value is the zero-value, but there are good
+	// reasons to make an exception here, for LUTs involving fingers.
 )
 
-type keyInfo struct {
+// This 2D LUT is for the max stretch distance allowed for bigrams
+// not to be penalized, given two fingers. The values are squared to
+// prevent wasting cycles on math.Sqrt function. Matrix must be
+// symmetric because order of fingers/symbols in bigrams doesn't
+// matter.
+var StretchLimitsSquared = [3 * 3]float32{
+	0, 1.56, 10.56,
+	1.56, 0, 6.25,
+	10.56, 6.25, 0,
+}
+
+type KeyInfo struct {
 	X, Y, Weight   float32
-	AssignedFinger finger
+	AssignedFinger Finger
 }
 
 // Do not touch above this line unless you know what you're doing.
@@ -24,13 +45,8 @@ type keyInfo struct {
 //
 // If you want to adjust a key's weight, change its 3rd field.
 // For example, the weight of {0, 2, 1.5, FingerMiddle} is 1.5.
-//
-// Adjust the number of keys included below when you're done.
-// Please make sure it's correct, or an error will occur.
 
-const NumKeysIncluded = 26
-
-var KeyConfig = [...]keyInfo{
+var KeyInfos = [NumKeys]KeyInfo{
 	// Row 1
 	{-2, 1.67, 2.5, FingerMiddle}, {-1, 1.76, 2, FingerMiddle}, {0, 2, 1.5, FingerMiddle}, {1, 2.08, 2, FingerIndex}, {2, 2, 2.5, FingerIndex}, {3, 1.92, 3, FingerIndex},
 	// Row 2
