@@ -99,6 +99,7 @@ counts. I decided to keep the data in terms of counts because it's more\
 informative, in case anyone wants to use these files themselves. The\
 initialization cost of turning them to frequencies is negligible.
 
+
 #5\
 Southeast Asian countries like Japan, Korea and China practice typing very\
 different from other countries, like joining simple letters to form new ones,\
@@ -147,6 +148,7 @@ The simulated annealing algorithm swaps 2 random keys/symbols every step. If\
 they are ``a`` and ``c`` in this example, it will calculate the cost delta of\
 bigrams containing ``a`` and ``c`` only.
 
+
 #8\
 Trigram data must be stored and accessed efficiently.
 
@@ -161,18 +163,75 @@ follow the same trend, and that more trigrams is too much noise to optimize for\
 any realistic one-handed keyboard layout. Implemented these data structures:
 ```Go
 type TrigramInfo struct {
-	Freq                 float32
-	orderedSymbolIndices [3]int8
+	Freq           float32
+	orderedSymbols [3]int8
 }
 
 var trigramInfos [numTopTrigrams]trigramInfo // where numTopTrigrams = 100
 
-var symbolToTrigramIndex [numSymbols*numTopTrigrams]int8
+var symbolToTrigrams [numSymbols*numTopTrigrams]int8
 ```
-``symbolToTrigramIndex`` is a flattened 2D matrix which takes the index of each\
-swapped symbol and returns a bucket of indices to the trigrams (or\
-``TrigramInfo``s) it belongs to, starting at offset ``numSymbols * symbolIndex``\
-and ending at ``offset + numTopTrigrams``. This cheap indexing maximizes\
-lookups but wastes some memory because the matrix is sparse. Rejected turning\
-it into a Compressed Sparse Matrix (CSF) because it would lead to pointer\
-chasing and/or\ more expensive indexing.
+``symbolToTrigrams`` is a flattened 2D matrix which takes the index of each\
+symbol and returns a bucket of indices to the trigrams it belongs to, starting\
+at offset ``numTopTrigrams * symbolIndex`` with a size of ``numTopTrigrams``.\
+This maximizes lookups but wastes some memory because the matrix is sparse.\
+Rejected turning it into a Compressed Sparse Matrix (CSF) because it would lead\
+to pointer chasing and/or\ more expensive indexing.
+
+
+#9\
+The engine uses bigram frequency data to punish same-finger bigrams and/or\
+stretches, regardless which key is pressed first. So the data should be for\
+unordered bigrams by aggregating ordered data (e.g.,``"ab" + "ba"``). The data\
+structure proposed in ``#7`` is inefficient because it stores data for ordered\
+bigrams, and on every swap, the engine has to make twice the number of passes\
+needed, were the data for unordered bigrams.
+
+Bigrams with non-distinct symbols, like ``aa``, ``bb``... should be ignored,\
+because the engine can't optimize for them.
+
+Assessed multiple data structures to solve this problem, but the only solution\
+that is readable, cheap to index, and constraint-free is a symmetric matrix\
+with a zero-value diagonal. For example, for symbols ``abcd``, we would have\
+this new matrix of bigram frequencies, but flattened:
+```
+    OldTable              NewTable
+[aa][ab][ac][ad]      [00][ab][ac][ad]
+[ba][bb][bc][bd]      [ab][00][bc][bd]
+[ca][cb][cc][cd]      [ac][bc][00][cd]
+[da][db][dc][dd]      [ad][bd][cd][00]
+...Where NewTable[i,j] = OldTable[i,j] + OldTable[j,i]
+```
+With the new table, if the engine swaps the symbols ``b`` and ``d``, we simply\
+re-evaluate the 2nd and 4th row -- 8 entries. With the old table, we would\
+have to re-evaluate the "cross" formed by each symbol -- 14 entries -- and\
+also deal with double-counting of bigrams containing both swapped symbols. The\
+new table implicitly deals with double-counting, and although time is wasted\
+processing the zero-entries, it is negligible and arguably necessary for\
+readability and maintenance.
+
+#10\
+The solution proposed in ``#8`` wastes a lot of memory and introduces an issue\
+with double-counting trigrams which happen to contain both swapped symbols.\
+
+``No notable constraints``
+
+Replaced wasteful sparse matrix with a bitmask for each symbol, where each bit\
+represents whether the symbol belongs to the trigram in ``trigramInfos``, with\
+the index equal to that bit's position. Example:
+```Go
+var symbolToTrigrams [numSymbols]uint64
+
+symbolToTrigrams[5] = 0b1010
+// This means that the symbol indexed 5 belongs to trigrams 1 and 3 in
+// trigramInfos. To extract the indices:
+for x = symbolToTrigrams[5]; x != 0; x &= (x-1) {
+	i := bits.TrailingZeros64(x)
+	// Process trigramInfos[i]
+}
+```
+Prevented double-counting of trigrams that contain both swapped symbols during\
+our engine, by simply taking the union of their ``symbolToTrigram`` entries\
+(bitwise ``OR``). But we must drop the number of trigrams tracked from 100 to\
+64 to use this solution. This might be better for the engine to prioritize the\
+trigrams that matter the most, anyway.

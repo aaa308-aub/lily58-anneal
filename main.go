@@ -79,6 +79,18 @@ func main() {
 			err,
 		))
 	}
+	// Symmetrize matrix by aggregating (i,j) and (j,i).
+	for i := 0; i < numSymbols; i++ {
+		for j := i + 1; j < numSymbols; j++ {
+			entryIndex := numSymbols*i + j
+			transposedIndex := numSymbols*j + i
+			aggregate := bigramFreqs[entryIndex] + bigramFreqs[transposedIndex]
+
+			// Assign to both sides
+			bigramFreqs[entryIndex] = aggregate
+			bigramFreqs[transposedIndex] = aggregate
+		}
+	}
 
 	type trigramInfo = assets.TrigramInfo
 	langDataFilePath = path.Join("assets", "counts", "trigrams", langDataFileName)
@@ -97,18 +109,11 @@ func main() {
 		))
 	}
 
-	var symbolToTrigrams [numSymbols * numTopTrigrams]int8
-	err = assets.MapSymbolsToTrigrams(
+	var symbolToTrigrams [numSymbols]uint64
+	assets.MapSymbolsToTrigrams(
 		symbolToTrigrams[:],
 		trigramInfos[:],
-		numTopTrigrams,
 	)
-	if err != nil {
-		panic(fmt.Errorf(
-			"failed to map symbols to trigrams: %w",
-			err,
-		))
-	}
 
 	// Filter out the excluded keys.
 	const numKeys = config.NumKeys
@@ -125,6 +130,10 @@ func main() {
 	for i := range identityLayout {
 		identityLayout[i] = i
 	}
+
+	// Note: A layout could mean either a mapping of keys to symbols or a
+	// mapping of symbols to keys (it's a bijection). So to be clear, if
+	// layout[5] = 3, the 3rd key is mapped to the 5th symbol.
 
 	//var wg sync.WaitGroup
 	seed := uint64(time.Now().UnixNano())

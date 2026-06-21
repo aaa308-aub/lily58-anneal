@@ -3,6 +3,8 @@ package annealing
 import (
 	"github.com/aaa308-aub/lily58-anneal/assets"
 	cf "github.com/aaa308-aub/lily58-anneal/config"
+
+	"math/bits"
 )
 
 const numSymbols = len(cf.TargetSymbols) // Assumed equal to number of included keys.
@@ -19,7 +21,7 @@ type annealingParams struct {
 	monogramFreqs    *[numSymbols]float32
 	bigramFreqs      *[numSymbols * numSymbols]float32
 	trigramInfos     *[numTopTrigrams]trigramInfo
-	symbolToTrigrams *[numSymbols * numTopTrigrams]int8
+	symbolToTrigrams *[numSymbols]uint64
 }
 
 // Builder function used to pass an instance of annealingParams to other
@@ -30,7 +32,7 @@ func CoupleAnnealingParams(
 	monogramFreqs *[numSymbols]float32,
 	bigramFreqs *[numSymbols * numSymbols]float32,
 	trigramInfos *[numTopTrigrams]trigramInfo,
-	symbolToTrigrams *[numSymbols * numTopTrigrams]int8,
+	symbolToTrigrams *[numSymbols]uint64,
 ) annealingParams {
 
 	return annealingParams{
@@ -43,193 +45,126 @@ func CoupleAnnealingParams(
 	}
 }
 
+// Distances are squared to avoid expensive square-root functions.
 func distanceSquared(x1, y1, x2, y2 float32) float32 {
 
 	dx, dy := x1-x2, y1-y2
 	return dx*dx + dy*dy
 }
 
-func monogramCost(freq, keyWeight float32) float32 {
-	return freq * keyWeight
-}
-
-func bigramCost(
-	freq float32,
-	finger1, finger2 finger,
-	distanceSquared float32,
-	stretchLimitSquared float32,
+// Finds monogram cost of input symbol. Fetches required info on its own.
+func monogramCost(
+	symbolIdx int,
+	freqs *[numSymbols]float32,
+	layout *[numSymbols]int,
+	keyInfos *[numSymbols]keyInfo,
 ) float32 {
 
-	cost := float32(0)
-
-	// Putting my faith in the branch predictor here. Will probably
-	// replace with another LUT.
-	if finger1 == finger2 {
-		cost += cf.PenaltySFB
-	}
-
-	if distanceSquared > stretchLimitSquared {
-		cost += (distanceSquared - stretchLimitSquared) * cf.PenaltyStretch
-	}
-
-	return cost * freq
+	key := keyInfos[layout[symbolIdx]]
+	weight := key.Weight
+	return freqs[symbolIdx] * weight
 }
 
-// Returns the reward in absolute value. Other cost functions are expected
-// to subtract this value, not add it.
-func trigramReward(
-	freq float32,
-	orderedFingers *[3]finger,
+// Finds sum of costs of all bigrams containing input symbol. Fetches
+// required info.
+func bigramsCost(
+	symbolIdx1 int,
+	freqs *[numSymbols * numSymbols]float32,
+	layout *[numSymbols]int,
+	keyInfos *[numSymbols]keyInfo,
 ) float32 {
 
-	// TODO: Replace with LUT. I don't think Go will make its own.
-	switch *orderedFingers {
-	case [3]finger{
-		cf.FingerRing,
-		cf.FingerMiddle,
-		cf.FingerIndex}:
-		return cf.RewardInwardRoll * freq
+	totalCost := float32(0)
+	key1 := keyInfos[layout[symbolIdx1]]
+	finger1, x1, y1 := key1.AssignedFinger, key1.X, key1.Y
 
-	case [3]finger{
-		cf.FingerIndex,
-		cf.FingerMiddle,
-		cf.FingerRing}:
-		return cf.RewardOutwardRoll * freq // Typically a lesser reward.
+	offset := numSymbols * symbolIdx1
+	for symbolIdx2 := 0; symbolIdx2 < numSymbols; symbolIdx2++ {
+		cost := float32(0)
+		key2 := keyInfos[layout[symbolIdx2]]
+		finger2, x2, y2 := key2.AssignedFinger, key2.X, key2.Y
 
-	default:
-		return 0
+		// Punish same-finger bigrams.
+		cost += cf.BigramFingersPenalty[finger1*numFingers+finger2]
+
+		// We could make LUTs for this, but for now I prefer this.
+		distanceSq := distanceSquared(x1, y1, x2, y2)
+		stretchLimitSq := cf.StretchLimitsSquared[finger1*numFingers+finger2]
+
+		if distanceSq > stretchLimitSq {
+			cost *= (distanceSq - stretchLimitSq) * cf.PenaltyStretchScaler
+			// Notice: the above equation is not linear w.r.t. actual distances.
+		}
+
+		totalCost += cost * freqs[offset+symbolIdx2]
 	}
+
+	return totalCost
+}
+
+// For every set bit (i.e., bit == 1) in input bitmask, finds the reward
+// of the trigram in trigramInfos with index equal to bit position. The
+// rewards are added together in absolute value, so other functions are
+// expected to subtract this value.
+func trigramsReward(
+	bitmask uint64,
+	trigramInfos *[numTopTrigrams]trigramInfo,
+	layout *[numSymbols]int,
+	keyInfos *[numSymbols]keyInfo,
+) float32 {
+
+	var totalCost float32
+	for ; bitmask != 0; bitmask &= (bitmask - 1) {
+		idx := bits.TrailingZeros64(bitmask)
+		t := &trigramInfos[idx]
+
+		f1 := keyInfos[layout[t.OrderedSymbols[0]]].AssignedFinger
+		f2 := keyInfos[layout[t.OrderedSymbols[1]]].AssignedFinger
+		f3 := keyInfos[layout[t.OrderedSymbols[2]]].AssignedFinger
+
+		reward := cf.TrigramFingersReward[f1*numFingers*numFingers+f2*numFingers+f3]
+		totalCost += t.Freq * reward
+	}
+	return totalCost
 }
 
 func InitialLayoutCost(
-	p annealingParams,
+	p annealingParams, // symbolToTrigrams is unused but that's okay.
 ) float32 {
-
-	// To have an easier time reading this function, remember that the layout
-	// is a fixed array of keys and the symbol-indices are scattered across.
 
 	cost := float32(0)
 
-	for key1, symbol1 := range p.layout {
+	for symbolIdx := range p.layout {
 		// Cost of monogram.
-		cost += monogramCost(
-			p.monogramFreqs[symbol1],
-			p.keyInfos[key1].Weight,
-		)
+		cost += monogramCost(symbolIdx, p.monogramFreqs, p.layout, p.keyInfos)
 
 		// Cost of bigrams.
-		offset := numSymbols * symbol1
-		for key2 := 0; key2 < len(p.layout); key2++ {
-
-			symbol2 := p.layout[key2]
-			bigram := offset + symbol2
-
-			key1Info, key2Info := p.keyInfos[key1], p.keyInfos[key2]
-
-			finger1 := key1Info.AssignedFinger
-			finger2 := key2Info.AssignedFinger
-
-			distanceSquared := distanceSquared(
-				key1Info.X, key1Info.Y,
-				key2Info.X, key2Info.Y,
-			)
-
-			stretchLimitSquared := cf.StretchLimitsSquared[finger1*numFingers+finger2]
-
-			cost += bigramCost(
-				p.bigramFreqs[bigram],
-				finger1, finger2,
-				distanceSquared,
-				stretchLimitSquared,
-			)
-		}
+		cost += bigramsCost(symbolIdx, p.bigramFreqs, p.layout, p.keyInfos)
 	}
 
 	// Reward of trigrams.
-	symbolToKey := make(map[int]int, numSymbols)
-	for key, symbol := range p.layout {
-		symbolToKey[symbol] = key
-	}
-
-	var orderedFingers [3]finger
-	for _, trigram := range p.trigramInfos {
-		for i, symbol := range trigram.OrderedSymbols {
-			key := symbolToKey[int(symbol)]
-			orderedFingers[i] = p.keyInfos[key].AssignedFinger
-		}
-
-		cost -= trigramReward(trigram.Freq, &orderedFingers)
-	}
+	const bitmaskFull = uint64(0xFF_FF_FF_FF_FF_FF_FF_FF)
+	cost -= trigramsReward(bitmaskFull, p.trigramInfos, p.layout, p.keyInfos)
 
 	return cost
 }
 
-// Finds the cost contributed by the symbol occupying layout[key].
-func symbolContribution(
-	key1 int,
+// Finds the cost contributed by two symbols.
+//
+// In the context of our engine, the cost contributed by one symbol is never
+// calculated alone, and we want to compute the union of bitmasks for trigrams
+// to avoid double-counting those that contain both swapped symbols. So this
+// is technically more idiomatic than implementing a single symbolContribution
+// function. Both are clean, though.
+func twoSymbolsContribution(
+	idx1, idx2 int,
 	p annealingParams,
-	isWithTrigrams bool,
 ) float32 {
-	symbol1 := p.layout[key1]
-	cost := monogramCost(p.monogramFreqs[symbol1], p.keyInfos[key1].Weight)
+	bitmaskUnion := p.symbolToTrigrams[idx1] | p.symbolToTrigrams[idx2]
 
-	// Cost of bigrams.
-	offset := numSymbols * symbol1
-	for key2 := 0; key2 < len(p.layout); key2++ {
-
-		symbol2 := p.layout[key2]
-		bigram := offset + symbol2
-
-		key1Info, key2Info := p.keyInfos[key1], p.keyInfos[key2]
-
-		finger1 := key1Info.AssignedFinger
-		finger2 := key2Info.AssignedFinger
-
-		distanceSquared := distanceSquared(
-			key1Info.X, key1Info.Y,
-			key2Info.X, key2Info.Y,
-		)
-
-		stretchLimitSquared := cf.StretchLimitsSquared[finger1*numFingers+finger2]
-
-		cost += bigramCost(
-			p.bigramFreqs[bigram],
-			finger1, finger2,
-			distanceSquared,
-			stretchLimitSquared,
-		)
-	}
-
-	if !isWithTrigrams {
-		return cost
-	}
-
-	var orderedFingers [3]finger
-	//offset = numSymbols * symbol1
-	for i := offset; i < offset+numTopTrigrams; i++ {
-
-		// TODO: Find a way to remove this branch. Probably another LUT.
-		trigramIndex := p.symbolToTrigrams[i]
-		switch trigramIndex {
-		case -1:
-			continue
-		default:
-			{
-				trigram := p.trigramInfos[trigramIndex]
-				for i, symbol := range trigram.OrderedSymbols {
-
-					// TODO: Replace this temporary linear search.
-					for key := range p.layout {
-						if p.layout[key] == int(symbol) {
-							orderedFingers[i] = p.keyInfos[key].AssignedFinger
-						}
-					}
-				}
-
-				cost -= trigramReward(trigram.Freq, &orderedFingers)
-			}
-		}
-	}
-
-	return cost
+	return monogramCost(idx1, p.monogramFreqs, p.layout, p.keyInfos) +
+		monogramCost(idx2, p.monogramFreqs, p.layout, p.keyInfos) +
+		bigramsCost(idx1, p.bigramFreqs, p.layout, p.keyInfos) +
+		bigramsCost(idx2, p.bigramFreqs, p.layout, p.keyInfos) -
+		trigramsReward(bitmaskUnion, p.trigramInfos, p.layout, p.keyInfos)
 }

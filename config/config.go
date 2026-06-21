@@ -1,11 +1,41 @@
 package config
 
 const NumKeys = 29
-const NumTopTrigrams = 100
-const PenaltySFB = float32(3)
-const PenaltyStretch = float32(2)
-const RewardInwardRoll = float32(3)
-const RewardOutwardRoll = RewardInwardRoll / 3
+const NumTopTrigrams = int8(64)
+const PenaltyStretchScaler = float32(0.5) // Do not raise too aggressively.
+
+// Small 2D LUT for penalty of fingers used to type bigram. Used to
+// only punish same-finger bigrams by default.
+var BigramFingersPenalty = [NumFingers * NumFingers]float32{
+	2, 1, 1,
+	1, 2, 1,
+	1, 1, 2,
+}
+
+// Small 2D LUT for the max stretch distance allowed for bigrams
+// not to be punished, given two fingers. The values are squared to
+// prevent wasting cycles on math.Sqrt function. Matrix must be
+// symmetric because order of fingers/symbols in bigrams doesn't
+// matter.
+var StretchLimitsSquared = [NumFingers * NumFingers]float32{
+	0, 1.56, 10.56,
+	1.56, 0, 6.25,
+	10.56, 6.25, 0,
+}
+
+// Small 3D LUT for trigram inward roll (ring->middle->index) reward
+// multiplier, and a smaller one for outward rolls (index->middle->ring).
+var TrigramFingersReward = [NumFingers * NumFingers * NumFingers]float32{
+	0, 0, 0,
+	0, 0, 3,
+	0, 0, 0,
+	0, 0, 0,
+	0, 0, 0,
+	0, 0, 0,
+	0, 0, 0,
+	1, 0, 0,
+	0, 0, 0,
+}
 
 type Finger uint8
 
@@ -18,17 +48,6 @@ const (
 	// Typically the null-value is the zero-value, but there are good
 	// reasons to make an exception here, for LUTs involving fingers.
 )
-
-// This 2D LUT is for the max stretch distance allowed for bigrams
-// not to be penalized, given two fingers. The values are squared to
-// prevent wasting cycles on math.Sqrt function. Matrix must be
-// symmetric because order of fingers/symbols in bigrams doesn't
-// matter.
-var StretchLimitsSquared = [3 * 3]float32{
-	0, 1.56, 10.56,
-	1.56, 0, 6.25,
-	10.56, 6.25, 0,
-}
 
 type KeyInfo struct {
 	X, Y, Weight   float32

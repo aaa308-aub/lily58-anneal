@@ -203,7 +203,7 @@ func GetTrigramData(
 	targetLanguagePath string,
 	targetSymbols []rune,
 	trigramInfos []TrigramInfo,
-	numTopTrigrams int,
+	numTopTrigrams int8,
 ) error {
 
 	file, err := openLanguageDataFile(targetLanguagePath)
@@ -214,14 +214,14 @@ func GetTrigramData(
 
 	numSymbols := len(targetSymbols)
 
-	symbolToIndex := make(map[rune]int, numSymbols)
+	symbolToIndex := make(map[rune]int8, numSymbols)
 	for i, symbol := range targetSymbols {
-		symbolToIndex[symbol] = i
+		symbolToIndex[symbol] = int8(i)
 	}
 
 	trigrams := make([][3]int8, numTopTrigrams)
 	counts := make([]float32, numTopTrigrams)
-	countsIndex := 0 // lineNumber can't be used if some trigrams are skipped.
+	countsIndex := int8(0) // lineNumber can't be used if some trigrams are skipped.
 	scanner, lineNumber := bufio.NewScanner(file), 0
 	for scanner.Scan() && countsIndex < numTopTrigrams {
 		lineNumber++
@@ -243,7 +243,7 @@ func GetTrigramData(
 			continue
 		}
 
-		trigrams[countsIndex] = [3]int8{int8(index1), int8(index2), int8(index3)}
+		trigrams[countsIndex] = [3]int8{index1, index2, index3}
 		counts[countsIndex] = float32(count)
 		countsIndex++
 	}
@@ -262,39 +262,25 @@ func GetTrigramData(
 		return err
 	}
 
-	for i := 0; i < numTopTrigrams; i++ {
+	for i := int8(0); i < numTopTrigrams; i++ {
 		trigramInfos[i] = TrigramInfo{counts[i], trigrams[i]}
 	}
 
 	return nil
 }
 
-// Takes trigramInfos from GetTrigramData to map each symbol to a bucket
-// of indices of trigrams it belongs to in a flattened but sparse matrix.
-//
-// The value -1 is used as a flag for empty slots.
+// Takes trigramInfos from GetTrigramData to map each symbol using a bitmask
+// to the indices of trigrams it belongs to.
 func MapSymbolsToTrigrams(
-	symbolToTrigrams []int8,
+	symbolToTrigrams []uint64,
 	trigramInfos []TrigramInfo,
-	numTrigrams int,
-) error {
-
-	// Each symbol's trigram-indices bucket ends with -1
-	for i := range symbolToTrigrams {
-		symbolToTrigrams[i] = -1
-	}
+) {
 
 	for i, trigram := range trigramInfos {
-		for _, symbolIndex := range trigram.OrderedSymbols {
-			offset := numTrigrams * int(symbolIndex)
-			for j := offset; j < offset+numTrigrams; j++ {
-				if symbolToTrigrams[j] == -1 {
-					symbolToTrigrams[j] = int8(i)
-					break
-				}
-			}
+		bit := uint64(1 << i)
+
+		for _, symbol := range trigram.OrderedSymbols {
+			symbolToTrigrams[symbol] |= bit
 		}
 	}
-
-	return nil
 }
