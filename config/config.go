@@ -1,5 +1,6 @@
 package config
 
+const NumAnnealingSteps = 50_000_000
 const NumKeys = 29
 const NumTopTrigrams = int8(64)
 const PenaltyStretchScaler = float32(0.5) // Do not raise too aggressively.

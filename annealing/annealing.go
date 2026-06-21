@@ -1,10 +1,15 @@
 package annealing
 
 import (
+	"fmt"
+	"sync"
+
 	"github.com/aaa308-aub/lily58-anneal/assets"
 	cf "github.com/aaa308-aub/lily58-anneal/config"
 
+	"math"
 	"math/bits"
+	"math/rand/v2"
 )
 
 const numSymbols = len(cf.TargetSymbols) // Assumed equal to number of included keys.
@@ -15,34 +20,13 @@ type finger = cf.Finger
 type keyInfo = cf.KeyInfo
 type trigramInfo = assets.TrigramInfo
 
-type annealingParams struct {
-	layout           *[numSymbols]int
-	keyInfos         *[numSymbols]keyInfo
-	monogramFreqs    *[numSymbols]float32
-	bigramFreqs      *[numSymbols * numSymbols]float32
-	trigramInfos     *[numTopTrigrams]trigramInfo
-	symbolToTrigrams *[numSymbols]uint64
-}
-
-// Builder function used to pass an instance of annealingParams to other
-// functions without having to export this type of struct.
-func CoupleAnnealingParams(
-	layout *[numSymbols]int,
-	keyInfos *[numSymbols]keyInfo,
-	monogramFreqs *[numSymbols]float32,
-	bigramFreqs *[numSymbols * numSymbols]float32,
-	trigramInfos *[numTopTrigrams]trigramInfo,
-	symbolToTrigrams *[numSymbols]uint64,
-) annealingParams {
-
-	return annealingParams{
-		layout,
-		keyInfos,
-		monogramFreqs,
-		bigramFreqs,
-		trigramInfos,
-		symbolToTrigrams,
-	}
+type AnnealingInputs struct { // Deep copy so that goroutines don't fight for data.
+	Layout           [numSymbols]int
+	KeyInfos         [numSymbols]keyInfo
+	MonogramFreqs    [numSymbols]float32
+	BigramFreqs      [numSymbols * numSymbols]float32
+	TrigramInfos     [numTopTrigrams]trigramInfo
+	SymbolToTrigrams [numSymbols]uint64
 }
 
 // Distances are squared to avoid expensive square-root functions.
@@ -50,6 +34,15 @@ func distanceSquared(x1, y1, x2, y2 float32) float32 {
 
 	dx, dy := x1-x2, y1-y2
 	return dx*dx + dy*dy
+}
+
+// This is the algorithm she told you not to worry about.
+//
+// Credit: Nicol N. Schraudolph's fast approximation for e^x.
+func fastExp(x float64) float64 {
+	bits := int64(6497320848556798*x + 4607182418800017408)
+	exp := math.Float64frombits(uint64(bits))
+	return exp
 }
 
 // Finds monogram cost of input symbol. Fetches required info on its own.
@@ -128,23 +121,23 @@ func trigramsReward(
 	return totalCost
 }
 
-func InitialLayoutCost(
-	p annealingParams, // symbolToTrigrams is unused but that's okay.
+func wholeLayoutCost(
+	p *AnnealingInputs,
 ) float32 {
 
 	cost := float32(0)
 
-	for symbolIdx := range p.layout {
+	for symbolIdx := range p.Layout {
 		// Cost of monogram.
-		cost += monogramCost(symbolIdx, p.monogramFreqs, p.layout, p.keyInfos)
+		cost += monogramCost(symbolIdx, &p.MonogramFreqs, &p.Layout, &p.KeyInfos)
 
 		// Cost of bigrams.
-		cost += bigramsCost(symbolIdx, p.bigramFreqs, p.layout, p.keyInfos)
+		cost += bigramsCost(symbolIdx, &p.BigramFreqs, &p.Layout, &p.KeyInfos)
 	}
 
 	// Reward of trigrams.
 	const bitmaskFull = uint64(0xFF_FF_FF_FF_FF_FF_FF_FF)
-	cost -= trigramsReward(bitmaskFull, p.trigramInfos, p.layout, p.keyInfos)
+	cost -= trigramsReward(bitmaskFull, &p.TrigramInfos, &p.Layout, &p.KeyInfos)
 
 	return cost
 }
@@ -155,16 +148,108 @@ func InitialLayoutCost(
 // calculated alone, and we want to compute the union of bitmasks for trigrams
 // to avoid double-counting those that contain both swapped symbols. So this
 // is technically more idiomatic than implementing a single symbolContribution
-// function. Both are clean, though.
+// function. Neither implementation is drastically better.
 func twoSymbolsContribution(
 	idx1, idx2 int,
-	p annealingParams,
+	p *AnnealingInputs,
 ) float32 {
-	bitmaskUnion := p.symbolToTrigrams[idx1] | p.symbolToTrigrams[idx2]
 
-	return monogramCost(idx1, p.monogramFreqs, p.layout, p.keyInfos) +
-		monogramCost(idx2, p.monogramFreqs, p.layout, p.keyInfos) +
-		bigramsCost(idx1, p.bigramFreqs, p.layout, p.keyInfos) +
-		bigramsCost(idx2, p.bigramFreqs, p.layout, p.keyInfos) -
-		trigramsReward(bitmaskUnion, p.trigramInfos, p.layout, p.keyInfos)
+	bitmaskUnion := p.SymbolToTrigrams[idx1] | p.SymbolToTrigrams[idx2]
+
+	return monogramCost(idx1, &p.MonogramFreqs, &p.Layout, &p.KeyInfos) +
+		monogramCost(idx2, &p.MonogramFreqs, &p.Layout, &p.KeyInfos) +
+		bigramsCost(idx1, &p.BigramFreqs, &p.Layout, &p.KeyInfos) +
+		bigramsCost(idx2, &p.BigramFreqs, &p.Layout, &p.KeyInfos) -
+		trigramsReward(bitmaskUnion, &p.TrigramInfos, &p.Layout, &p.KeyInfos)
+}
+
+// Finds the right initial and final temperatures as well as the cooling
+// factor, such that the average bad swap has a 90% acceptance chance
+// initially and becomes 0.1% once 99% of swaps are processed.
+func findTempParameters(
+	p *AnnealingInputs,
+	r *rand.Rand,
+) (float64, float64, float64) {
+
+	deltaCostAvg := float32(0)
+
+	// Tested different sample sizes and the average seems to converge
+	// quickly for 1'000 bad swaps, so 10'000 is sufficient.
+	for badSwapsCounter := 0; badSwapsCounter < 10000; {
+		i := r.IntN(numSymbols)
+		j := r.IntN(numSymbols)
+
+		for i == j {
+			// Whichever is re-rolled arguably doesn't matter so
+			// this may be redundant.
+			switch r.IntN(2) {
+			case 0:
+				i = r.IntN(numSymbols)
+			case 1:
+				j = r.IntN(numSymbols)
+			}
+		}
+
+		costOld := twoSymbolsContribution(i, j, p)
+		p.Layout[i], p.Layout[j] = p.Layout[j], p.Layout[i]
+		costNew := twoSymbolsContribution(i, j, p)
+
+		deltaCost := costNew - costOld
+		if deltaCost > 0 {
+			badSwapsCounter++
+			deltaCostAvg += (deltaCost - deltaCostAvg) / float32(badSwapsCounter)
+		}
+	}
+
+	tempInitial := float64(deltaCostAvg) / -math.Log(0.9)
+	tempFinal := float64(deltaCostAvg) / -math.Log(0.001)
+
+	const OnePercentThreshold = float64(cf.NumAnnealingSteps * 99 / 100)
+	coolingFactor := math.Pow(tempFinal/tempInitial, 1/OnePercentThreshold)
+
+	return tempInitial, tempFinal, coolingFactor
+}
+
+func RunAnnealing(
+	p AnnealingInputs,
+	r *rand.Rand,
+	wg *sync.WaitGroup,
+) {
+	defer wg.Done()
+
+	temp, _, coolingFactor := findTempParameters(&p, r)
+
+	score := wholeLayoutCost(&p)
+	fmt.Printf("initial score: %f\n", score)
+
+	for i := 0; i < cf.NumAnnealingSteps; i++ {
+		i := r.IntN(numSymbols)
+		j := r.IntN(numSymbols)
+
+		for i == j {
+			// Again, this may be redundant.
+			switch r.IntN(2) {
+			case 0:
+				i = r.IntN(numSymbols)
+			case 1:
+				j = r.IntN(numSymbols)
+			}
+		}
+
+		costOld := twoSymbolsContribution(i, j, &p)
+		p.Layout[i], p.Layout[j] = p.Layout[j], p.Layout[i]
+		costNew := twoSymbolsContribution(i, j, &p)
+
+		deltaCost := costNew - costOld
+		if deltaCost <= 0 || r.Float64() <= fastExp(-float64(deltaCost)/temp) {
+			score += deltaCost
+		} else { // Rejected; switch back.
+			p.Layout[i], p.Layout[j] = p.Layout[j], p.Layout[i]
+		}
+
+		temp *= coolingFactor
+	}
+
+	fmt.Printf("final score: %f\t", score)
+	fmt.Printf("|\tlayout: %v\n", p.Layout)
 }

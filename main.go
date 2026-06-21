@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 	"path"
 	"runtime"
+	"sync"
 
 	//"sync"
 	"time"
@@ -135,10 +136,10 @@ func main() {
 	// mapping of symbols to keys (it's a bijection). So to be clear, if
 	// layout[5] = 3, the 3rd key is mapped to the 5th symbol.
 
-	//var wg sync.WaitGroup
+	var wg sync.WaitGroup
 	seed := uint64(time.Now().UnixNano())
 	for i := 0; i < runtime.NumCPU(); i++ {
-		//wg.Add(1)
+		wg.Add(1)
 
 		stream := uint64(i)
 		source := rand.NewPCG(seed, stream)
@@ -149,17 +150,18 @@ func main() {
 			layout[i], layout[j] = layout[j], layout[i]
 		})
 
-		params := annealing.CoupleAnnealingParams(
-			&layout,
-			&keys,
-			&monogramFreqs,
-			&bigramFreqs,
-			&trigramInfos,
-			&symbolToTrigrams,
-		)
+		// Do deep copies to make each goroutine own its data and
+		// to avoid bus saturation.
+		annealingInputs := annealing.AnnealingInputs{
+			Layout:           layout,
+			KeyInfos:         keys,
+			MonogramFreqs:    monogramFreqs,
+			BigramFreqs:      bigramFreqs,
+			TrigramInfos:     trigramInfos,
+			SymbolToTrigrams: symbolToTrigrams,
+		}
 
-		cost := annealing.InitialLayoutCost(params)
-		fmt.Println(layout, cost)
+		go annealing.RunAnnealing(annealingInputs, localRand, &wg)
 	}
-	//wg.Wait()
+	wg.Wait()
 }
