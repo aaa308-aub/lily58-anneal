@@ -27,13 +27,13 @@ var StretchLimitsSquared = [NumFingers * NumFingers]float32{
 // multiplier, and a smaller one for outward rolls (index->middle->ring).
 var TrigramFingersReward = [NumFingers * NumFingers * NumFingers]float32{
 	0, 0, 0,
-	0, 0, 3,
+	0, 0, 7.5,
 	0, 0, 0,
 	0, 0, 0,
 	0, 0, 0,
 	0, 0, 0,
 	0, 0, 0,
-	1, 0, 0,
+	2.5, 0, 0,
 	0, 0, 0,
 }
 
