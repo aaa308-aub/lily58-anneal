@@ -16,11 +16,11 @@ const numSymbols = len(cf.TargetSymbols) // Assumed equal to number of included 
 const numTopTrigrams = cf.NumTopTrigrams
 const numFingers = cf.NumFingers
 
-type finger = cf.Finger
 type keyInfo = cf.KeyInfo
 type trigramInfo = assets.TrigramInfo
 
-type AnnealingInputs struct { // Deep copy so that goroutines don't fight for data.
+// Purpose: deep-copying data to prevent cache contention between goroutines.
+type AnnealingInputs struct {
 	Layout           [numSymbols]int
 	KeyInfos         [numSymbols]keyInfo
 	MonogramFreqs    [numSymbols]float32
@@ -28,6 +28,46 @@ type AnnealingInputs struct { // Deep copy so that goroutines don't fight for da
 	TrigramInfos     [numTopTrigrams]trigramInfo
 	SymbolToTrigrams [numSymbols]uint64
 }
+
+// Excluded keys are not part of this LUT.
+var distancesSquaredLUT = func() [numSymbols * numSymbols]float32 {
+
+	// Filter out excluded keys first.
+	var keys [numSymbols]cf.KeyInfo
+	for i, j := 0, 0; i < cf.NumKeys; i++ {
+		key := cf.KeyInfos[i]
+		if key.AssignedFinger != cf.FingerNil {
+			keys[j] = key
+			j++
+		}
+	}
+
+	const N = numSymbols
+	var lut [N * N]float32
+	for i := range N {
+		for j := range N {
+			key1 := keys[i]
+			key2 := keys[j]
+			lut[N*i+j] = distanceSquared(key1.X, key1.Y, key2.X, key2.Y)
+		}
+	}
+	return lut
+}()
+
+// LUT to correct Schraudolph's fastExp function which has a
+// periodic error function with period = ln(2). We use that to
+// our advantage to sample over the period.
+var fastExpErrorLUT = func() [64]float64 {
+
+	var lut [64]float64
+	for i := range 64 {
+		x := float64(i) * math.Log(2) / 64
+		bits := int64(6497320848556798*x + 4607182418800017408)
+		approx := math.Float64frombits(uint64(bits))
+		lut[i] = math.Exp(x) / approx
+	}
+	return lut
+}()
 
 // Distances are squared to avoid expensive square-root functions.
 func distanceSquared(x1, y1, x2, y2 float32) float32 {
@@ -38,14 +78,27 @@ func distanceSquared(x1, y1, x2, y2 float32) float32 {
 
 // This is the algorithm she told you not to worry about.
 //
-// Credit: Nicol N. Schraudolph's fast approximation for e^x.
+// Credit: Nicol N. Schraudolph's fast approximation for e^x, modified
+// with error-correcting samples. Error margin went down from 6% to 0.17%.
+//
+// See special cases if |x| > ~708 -- would normally cause overflow.
 func fastExp(x float64) float64 {
+
+	if x > 700 {
+		return math.Inf(1)
+	}
+	if x < -700 {
+		return 0
+	}
+
 	bits := int64(6497320848556798*x + 4607182418800017408)
 	exp := math.Float64frombits(uint64(bits))
-	return exp
+
+	index := (bits >> 46) & 0x3F // This function gets only weirder, huh?
+	return exp * fastExpErrorLUT[index]
 }
 
-// Finds monogram cost of input symbol. Fetches required info on its own.
+// Finds monogram cost of input symbol.
 func monogramCost(
 	symbolIdx int,
 	freqs *[numSymbols]float32,
@@ -58,9 +111,32 @@ func monogramCost(
 	return freqs[symbolIdx] * weight
 }
 
-// Finds sum of costs of all bigrams containing input symbol. Fetches
-// required info.
-func bigramsCost(
+func bigramCost(
+	symbolIdx1, symbolIdx2 int,
+	freqs *[numSymbols * numSymbols]float32,
+	layout *[numSymbols]int,
+	keyInfos *[numSymbols]keyInfo,
+) float32 {
+
+	keyIdx1, keyIdx2 := layout[symbolIdx1], layout[symbolIdx2]
+	finger1 := keyInfos[keyIdx1].AssignedFinger
+	finger2 := keyInfos[keyIdx2].AssignedFinger
+
+	cost := cf.BigramFingersPenalty[finger1*numFingers+finger2]
+
+	distanceSq := distancesSquaredLUT[numSymbols*keyIdx1+keyIdx2]
+	stretchLimitSq := cf.StretchLimitsSquared[numFingers*finger1+finger2]
+
+	if distanceSq > stretchLimitSq {
+		cost *= (distanceSq - stretchLimitSq) * cf.PenaltyStretchScaler
+		// Notice: the above equation is not linear w.r.t. actual distances.
+	}
+
+	return cost * freqs[numSymbols*symbolIdx1+symbolIdx2]
+}
+
+// Finds sum of costs of all bigrams containing input symbol.
+func bigramsCostWithSymbol(
 	symbolIdx1 int,
 	freqs *[numSymbols * numSymbols]float32,
 	layout *[numSymbols]int,
@@ -68,28 +144,25 @@ func bigramsCost(
 ) float32 {
 
 	totalCost := float32(0)
-	key1 := keyInfos[layout[symbolIdx1]]
-	finger1, x1, y1 := key1.AssignedFinger, key1.X, key1.Y
 
-	offset := numSymbols * symbolIdx1
-	for symbolIdx2 := 0; symbolIdx2 < numSymbols; symbolIdx2++ {
-		cost := float32(0)
-		key2 := keyInfos[layout[symbolIdx2]]
-		finger2, x2, y2 := key2.AssignedFinger, key2.X, key2.Y
+	// Note: Had to inline bigramCost myself in this for-loop because the
+	// compiler refuses to. Without duplicating the code, execution time
+	// grows wastefully by 20%.
+	for symbolIdx2 := range numSymbols {
+		keyIdx1, keyIdx2 := layout[symbolIdx1], layout[symbolIdx2]
+		finger1 := keyInfos[keyIdx1].AssignedFinger
+		finger2 := keyInfos[keyIdx2].AssignedFinger
 
-		// Punish same-finger bigrams.
-		cost += cf.BigramFingersPenalty[finger1*numFingers+finger2]
+		cost := cf.BigramFingersPenalty[finger1*numFingers+finger2]
 
-		// We could make LUTs for this, but for now I prefer this.
-		distanceSq := distanceSquared(x1, y1, x2, y2)
-		stretchLimitSq := cf.StretchLimitsSquared[finger1*numFingers+finger2]
+		distanceSq := distancesSquaredLUT[numSymbols*keyIdx1+keyIdx2]
+		stretchLimitSq := cf.StretchLimitsSquared[numFingers*finger1+finger2]
 
 		if distanceSq > stretchLimitSq {
 			cost *= (distanceSq - stretchLimitSq) * cf.PenaltyStretchScaler
-			// Notice: the above equation is not linear w.r.t. actual distances.
 		}
 
-		totalCost += cost * freqs[offset+symbolIdx2]
+		totalCost += cost * freqs[numSymbols*symbolIdx1+symbolIdx2]
 	}
 
 	return totalCost
@@ -121,7 +194,7 @@ func trigramsReward(
 	return totalCost
 }
 
-func wholeLayoutCost(
+func WholeLayoutCost(
 	p *AnnealingInputs,
 ) float32 {
 
@@ -130,9 +203,13 @@ func wholeLayoutCost(
 	for symbolIdx := range p.Layout {
 		// Cost of monogram.
 		cost += monogramCost(symbolIdx, &p.MonogramFreqs, &p.Layout, &p.KeyInfos)
+	}
 
-		// Cost of bigrams.
-		cost += bigramsCost(symbolIdx, &p.BigramFreqs, &p.Layout, &p.KeyInfos)
+	// Cost of bigrams.
+	for symbolIdx1 := 1; symbolIdx1 < numSymbols; symbolIdx1++ {
+		for symbolIdx2 := 0; symbolIdx2 < symbolIdx1; symbolIdx2++ {
+			cost += bigramCost(symbolIdx1, symbolIdx2, &p.BigramFreqs, &p.Layout, &p.KeyInfos)
+		}
 	}
 
 	// Reward of trigrams.
@@ -158,24 +235,31 @@ func twoSymbolsContribution(
 
 	return monogramCost(idx1, &p.MonogramFreqs, &p.Layout, &p.KeyInfos) +
 		monogramCost(idx2, &p.MonogramFreqs, &p.Layout, &p.KeyInfos) +
-		bigramsCost(idx1, &p.BigramFreqs, &p.Layout, &p.KeyInfos) +
-		bigramsCost(idx2, &p.BigramFreqs, &p.Layout, &p.KeyInfos) -
+		bigramsCostWithSymbol(idx1, &p.BigramFreqs, &p.Layout, &p.KeyInfos) +
+		bigramsCostWithSymbol(idx2, &p.BigramFreqs, &p.Layout, &p.KeyInfos) -
+		bigramCost(idx1, idx2, &p.BigramFreqs, &p.Layout, &p.KeyInfos) -
 		trigramsReward(bitmaskUnion, &p.TrigramInfos, &p.Layout, &p.KeyInfos)
 }
 
 // Finds the right initial and final temperatures as well as the cooling
 // factor, such that the average bad swap has a 90% acceptance chance
 // initially and becomes 0.1% once 99% of swaps are processed.
+//
+// Notice: not thread safe.
 func findTempParameters(
 	p *AnnealingInputs,
 	r *rand.Rand,
 ) (float64, float64, float64) {
 
+	// Must deep-copy the layout in case it's needed un-modified and
+	// restore at the end.
+	layoutCopy := p.Layout
+
 	deltaCostAvg := float32(0)
 
 	// Tested different sample sizes and the average seems to converge
 	// quickly for 1'000 bad swaps, so 10'000 is sufficient.
-	for badSwapsCounter := 0; badSwapsCounter < 10000; {
+	for badSwapsCount := 0; badSwapsCount < 10000; {
 		i := r.IntN(numSymbols)
 		j := r.IntN(numSymbols)
 
@@ -196,16 +280,18 @@ func findTempParameters(
 
 		deltaCost := costNew - costOld
 		if deltaCost > 0 {
-			badSwapsCounter++
-			deltaCostAvg += (deltaCost - deltaCostAvg) / float32(badSwapsCounter)
+			badSwapsCount++
+			deltaCostAvg += (deltaCost - deltaCostAvg) / float32(badSwapsCount)
 		}
 	}
+
+	p.Layout = layoutCopy
 
 	tempInitial := float64(deltaCostAvg) / -math.Log(0.9)
 	tempFinal := float64(deltaCostAvg) / -math.Log(0.001)
 
-	const OnePercentThreshold = float64(cf.NumAnnealingSteps * 99 / 100)
-	coolingFactor := math.Pow(tempFinal/tempInitial, 1/OnePercentThreshold)
+	const onePercentThreshold = float64(cf.NumAnnealingSteps * 99 / 100)
+	coolingFactor := math.Pow(tempFinal/tempInitial, 1/onePercentThreshold)
 
 	return tempInitial, tempFinal, coolingFactor
 }
@@ -215,14 +301,15 @@ func RunAnnealing(
 	r *rand.Rand,
 	wg *sync.WaitGroup,
 ) {
+
 	defer wg.Done()
 
 	temp, _, coolingFactor := findTempParameters(&p, r)
 
-	score := wholeLayoutCost(&p)
+	score := WholeLayoutCost(&p)
 	fmt.Printf("initial score: %f\n", score)
 
-	for i := 0; i < cf.NumAnnealingSteps; i++ {
+	for range cf.NumAnnealingSteps {
 		i := r.IntN(numSymbols)
 		j := r.IntN(numSymbols)
 
@@ -241,15 +328,53 @@ func RunAnnealing(
 		costNew := twoSymbolsContribution(i, j, &p)
 
 		deltaCost := costNew - costOld
-		if deltaCost <= 0 || r.Float64() <= fastExp(-float64(deltaCost)/temp) {
-			score += deltaCost
-		} else { // Rejected; switch back.
+		if deltaCost > 0 && r.Float64() > fastExp(-float64(deltaCost)/temp) {
+			// Rejected; switch back.
 			p.Layout[i], p.Layout[j] = p.Layout[j], p.Layout[i]
 		}
 
 		temp *= coolingFactor
 	}
 
-	fmt.Printf("final score: %f\t", score)
+	fmt.Printf("final score: %f\t", WholeLayoutCost(&p))
+	fmt.Printf("|\tlayout: %v\n", p.Layout)
+}
+
+// Used for remarkable layouts to dig deeper if possible.
+func ProbeRegionGreedy(
+	p AnnealingInputs,
+	r *rand.Rand,
+) {
+
+	score := WholeLayoutCost(&p)
+	fmt.Printf("initial score: %f\n", score)
+
+	// Most of these steps are probably a waste of compute.
+	for range cf.NumAnnealingSteps {
+		i := r.IntN(numSymbols)
+		j := r.IntN(numSymbols)
+
+		for i == j {
+			// Again, this may be redundant.
+			switch r.IntN(2) {
+			case 0:
+				i = r.IntN(numSymbols)
+			case 1:
+				j = r.IntN(numSymbols)
+			}
+		}
+
+		costOld := twoSymbolsContribution(i, j, &p)
+		p.Layout[i], p.Layout[j] = p.Layout[j], p.Layout[i]
+		costNew := twoSymbolsContribution(i, j, &p)
+
+		deltaCost := costNew - costOld
+		if deltaCost > 0 {
+			// Rejected; switch back.
+			p.Layout[i], p.Layout[j] = p.Layout[j], p.Layout[i]
+		}
+	}
+
+	fmt.Printf("final score: %f\t", WholeLayoutCost(&p))
 	fmt.Printf("|\tlayout: %v\n", p.Layout)
 }

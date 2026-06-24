@@ -51,7 +51,7 @@ with fingers (``ring->middle->index``).
 Someone who's interested in their own one-handed Lily58 may use this engine,\
 but for a language different from English.
 
-``No notable constraints``
+``No notable constraints.``
 
 Engine supports any inputs/symbols. Written in Go to standardize symbols with\
 runes encoded in ``UTF-8``.
@@ -105,7 +105,7 @@ Southeast Asian countries like Japan, Korea and China practice typing very\
 different from other countries, like joining simple letters to form new ones,\
 leading to complications in n-gram data and what it may represent.
 
-``No notable constraints``
+``No notable constraints.``
 
 Removed n-gram data for Southeast Asian languages due to high language-specific\
 complexity that cannot be handled in this project, at least for the moment.
@@ -205,16 +205,15 @@ this new matrix of bigram frequencies, but flattened:
 With the new table, if the engine swaps the symbols ``b`` and ``d``, we simply\
 re-evaluate the 2nd and 4th row -- 8 entries. With the old table, we would\
 have to re-evaluate the "cross" formed by each symbol -- 14 entries -- and\
-also deal with double-counting of bigrams containing both swapped symbols. The\
-new table implicitly deals with double-counting, and although time is wasted\
-processing the zero-entries, it is negligible and arguably necessary for\
-readability and maintenance.
+also deal with double-counting of bigrams containing both swapped symbols.\
+Although time is wasted processing the zero-entries, it is negligible and\
+arguably necessary for readability and maintenance.
 
 #10\
 The solution proposed in ``#8`` wastes a lot of memory and introduces an issue\
 with double-counting trigrams which happen to contain both swapped symbols.\
 
-``No notable constraints``
+``No notable constraints.``
 
 Replaced wasteful sparse matrix with a bitmask for each symbol, where each bit\
 represents whether the symbol belongs to the trigram in ``trigramInfos``, with\
@@ -235,3 +234,18 @@ our engine, by simply taking the union of their ``symbolToTrigram`` entries\
 (bitwise ``OR``). But we must drop the number of trigrams tracked from 100 to\
 64 to use this solution. This might be better for the engine to prioritize the\
 trigrams that matter the most, anyway.
+
+#11\
+``WholeCostLayout`` of output layout does not match the cost (score) that is\
+being calculated by adding ``deltaCost`` every swap. There is a logical error\
+somewhere.
+
+``No notable constraints.``
+
+Implemented ``bigramCost`` function mainly to un-count the double-counted\
+bigram on every swap that happens to contain both swapped symbols, which was\
+naively thought to be implicitly handled by the data structure implemented for\
+problem ``#9``. ``WholeCostLayout`` is now almost equal to the output score,\
+with slight difference due to float32 rounding errors. I simply stopped adding\
+``deltaCost`` to the score every swap (when it's accepted) because there's just\
+no need, and instead use ``WholeCostLayout``'s output to print the final score.

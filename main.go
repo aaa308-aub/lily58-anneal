@@ -81,7 +81,7 @@ func main() {
 		))
 	}
 	// Symmetrize matrix by aggregating (i,j) and (j,i).
-	for i := 0; i < numSymbols; i++ {
+	for i := range numSymbols {
 		for j := i + 1; j < numSymbols; j++ {
 			entryIndex := numSymbols*i + j
 			transposedIndex := numSymbols*j + i
