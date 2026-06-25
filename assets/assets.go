@@ -262,7 +262,7 @@ func GetTrigramData(
 		return err
 	}
 
-	for i := int8(0); i < numTopTrigrams; i++ {
+	for i := range numTopTrigrams {
 		trigramInfos[i] = TrigramInfo{counts[i], trigrams[i]}
 	}
 

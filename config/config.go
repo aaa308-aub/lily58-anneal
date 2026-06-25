@@ -1,9 +1,16 @@
 package config
 
-const NumAnnealingSteps = 50_000_000
-const NumKeys = 29
-const NumTopTrigrams = int8(64)
-const PenaltyStretchScaler = float32(0.5) // Do not raise too aggressively.
+import "unicode"
+
+const (
+	Mode                 = "anneal" // "anneal" | "bruteforce".
+	IgnoreTrigrams       = false    // true | false.
+	ExcludedKeySymbol    = '·'      // Safe to change to anything you want.
+	NumAnnealingSteps    = 50_000_000
+	NumKeys              = 29
+	NumTopTrigrams       = int8(64)
+	PenaltyStretchScaler = float32(0.5) // Do not raise too aggressively.
+)
 
 // Small 2D LUT for penalty of fingers used to type bigram. Used to
 // only punish same-finger bigrams by default.
@@ -99,8 +106,20 @@ var KeyInfos = [NumKeys]KeyInfo{
 // belong to the language you chose, and that their number is the same as
 // the number of keys included. Otherwise, an error will occur.
 
-const TargetSymbols = "abcdefghijklmnopqrstuvwxyz"
+const targetSymbolsString = "abcdefghijklmnopqrstuvwxyz"
 
 // For the available languages and their alphabets, see the README.
 
 const TargetLanguageCode = "en"
+
+// Don't touch these variables below unless you know what you're doing.
+
+const NumSymbols = len(targetSymbolsString)
+
+var TargetSymbols = func() [NumSymbols]rune {
+	var ts [NumSymbols]rune
+	for i, symbol := range targetSymbolsString {
+		ts[i] = unicode.ToLower(symbol)
+	}
+	return ts
+}()

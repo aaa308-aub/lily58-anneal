@@ -5,18 +5,24 @@ import (
 	"sync"
 
 	"github.com/aaa308-aub/lily58-anneal/assets"
-	cf "github.com/aaa308-aub/lily58-anneal/config"
+	msg "github.com/aaa308-aub/lily58-anneal/assets/messages"
+	cfg "github.com/aaa308-aub/lily58-anneal/config"
 
 	"math"
 	"math/bits"
 	"math/rand/v2"
 )
 
-const numSymbols = len(cf.TargetSymbols) // Assumed equal to number of included keys.
-const numTopTrigrams = cf.NumTopTrigrams
-const numFingers = cf.NumFingers
+const (
+	numSymbols     = cfg.NumSymbols // Assumed equal to number of included keys.
+	numTopTrigrams = cfg.NumTopTrigrams
+	numFingers     = cfg.NumFingers
+	ignoreTrigrams = cfg.IgnoreTrigrams
+)
 
-type keyInfo = cf.KeyInfo
+var msgChan = msg.MainChannel
+
+type keyInfo = cfg.KeyInfo
 type trigramInfo = assets.TrigramInfo
 
 // Purpose: deep-copying data to prevent cache contention between goroutines.
@@ -33,10 +39,10 @@ type AnnealingInputs struct {
 var distancesSquaredLUT = func() [numSymbols * numSymbols]float32 {
 
 	// Filter out excluded keys first.
-	var keys [numSymbols]cf.KeyInfo
-	for i, j := 0, 0; i < cf.NumKeys; i++ {
-		key := cf.KeyInfos[i]
-		if key.AssignedFinger != cf.FingerNil {
+	var keys [numSymbols]cfg.KeyInfo
+	for i, j := 0, 0; i < cfg.NumKeys; i++ {
+		key := cfg.KeyInfos[i]
+		if key.AssignedFinger != cfg.FingerNil {
 			keys[j] = key
 			j++
 		}
@@ -122,13 +128,13 @@ func bigramCost(
 	finger1 := keyInfos[keyIdx1].AssignedFinger
 	finger2 := keyInfos[keyIdx2].AssignedFinger
 
-	cost := cf.BigramFingersPenalty[finger1*numFingers+finger2]
+	cost := cfg.BigramFingersPenalty[finger1*numFingers+finger2]
 
 	distanceSq := distancesSquaredLUT[numSymbols*keyIdx1+keyIdx2]
-	stretchLimitSq := cf.StretchLimitsSquared[numFingers*finger1+finger2]
+	stretchLimitSq := cfg.StretchLimitsSquared[numFingers*finger1+finger2]
 
 	if distanceSq > stretchLimitSq {
-		cost *= (distanceSq - stretchLimitSq) * cf.PenaltyStretchScaler
+		cost *= (distanceSq - stretchLimitSq) * cfg.PenaltyStretchScaler
 		// Notice: the above equation is not linear w.r.t. actual distances.
 	}
 
@@ -153,13 +159,13 @@ func bigramsCostWithSymbol(
 		finger1 := keyInfos[keyIdx1].AssignedFinger
 		finger2 := keyInfos[keyIdx2].AssignedFinger
 
-		cost := cf.BigramFingersPenalty[finger1*numFingers+finger2]
+		cost := cfg.BigramFingersPenalty[finger1*numFingers+finger2]
 
 		distanceSq := distancesSquaredLUT[numSymbols*keyIdx1+keyIdx2]
-		stretchLimitSq := cf.StretchLimitsSquared[numFingers*finger1+finger2]
+		stretchLimitSq := cfg.StretchLimitsSquared[numFingers*finger1+finger2]
 
 		if distanceSq > stretchLimitSq {
-			cost *= (distanceSq - stretchLimitSq) * cf.PenaltyStretchScaler
+			cost *= (distanceSq - stretchLimitSq) * cfg.PenaltyStretchScaler
 		}
 
 		totalCost += cost * freqs[numSymbols*symbolIdx1+symbolIdx2]
@@ -188,7 +194,7 @@ func trigramsReward(
 		f2 := keyInfos[layout[t.OrderedSymbols[1]]].AssignedFinger
 		f3 := keyInfos[layout[t.OrderedSymbols[2]]].AssignedFinger
 
-		reward := cf.TrigramFingersReward[f1*numFingers*numFingers+f2*numFingers+f3]
+		reward := cfg.TrigramFingersReward[f1*numFingers*numFingers+f2*numFingers+f3]
 		totalCost += t.Freq * reward
 	}
 	return totalCost
@@ -213,8 +219,10 @@ func WholeLayoutCost(
 	}
 
 	// Reward of trigrams.
-	const bitmaskFull = uint64(0xFF_FF_FF_FF_FF_FF_FF_FF)
-	cost -= trigramsReward(bitmaskFull, &p.TrigramInfos, &p.Layout, &p.KeyInfos)
+	if !ignoreTrigrams {
+		const bitmaskFull = uint64(0xFF_FF_FF_FF_FF_FF_FF_FF)
+		cost -= trigramsReward(bitmaskFull, &p.TrigramInfos, &p.Layout, &p.KeyInfos)
+	}
 
 	return cost
 }
@@ -231,14 +239,19 @@ func twoSymbolsContribution(
 	p *AnnealingInputs,
 ) float32 {
 
-	bitmaskUnion := p.SymbolToTrigrams[idx1] | p.SymbolToTrigrams[idx2]
-
-	return monogramCost(idx1, &p.MonogramFreqs, &p.Layout, &p.KeyInfos) +
+	cost := monogramCost(idx1, &p.MonogramFreqs, &p.Layout, &p.KeyInfos) +
 		monogramCost(idx2, &p.MonogramFreqs, &p.Layout, &p.KeyInfos) +
 		bigramsCostWithSymbol(idx1, &p.BigramFreqs, &p.Layout, &p.KeyInfos) +
 		bigramsCostWithSymbol(idx2, &p.BigramFreqs, &p.Layout, &p.KeyInfos) -
-		bigramCost(idx1, idx2, &p.BigramFreqs, &p.Layout, &p.KeyInfos) -
-		trigramsReward(bitmaskUnion, &p.TrigramInfos, &p.Layout, &p.KeyInfos)
+		bigramCost(idx1, idx2, &p.BigramFreqs, &p.Layout, &p.KeyInfos)
+
+	if ignoreTrigrams {
+		return cost
+	}
+
+	bitmaskUnion := p.SymbolToTrigrams[idx1] | p.SymbolToTrigrams[idx2]
+	tr := trigramsReward(bitmaskUnion, &p.TrigramInfos, &p.Layout, &p.KeyInfos)
+	return cost - tr
 }
 
 // Finds the right initial and final temperatures as well as the cooling
@@ -290,14 +303,16 @@ func findTempParameters(
 	tempInitial := float64(deltaCostAvg) / -math.Log(0.9)
 	tempFinal := float64(deltaCostAvg) / -math.Log(0.001)
 
-	const onePercentThreshold = float64(cf.NumAnnealingSteps * 99 / 100)
+	const onePercentThreshold = float64(cfg.NumAnnealingSteps * 99 / 100)
 	coolingFactor := math.Pow(tempFinal/tempInitial, 1/onePercentThreshold)
 
 	return tempInitial, tempFinal, coolingFactor
 }
 
+// Be careful to input the worker goroutine's waitgroup, not the printer/logger.
 func RunAnnealing(
 	p AnnealingInputs,
+	id int,
 	r *rand.Rand,
 	wg *sync.WaitGroup,
 ) {
@@ -305,11 +320,16 @@ func RunAnnealing(
 	defer wg.Done()
 
 	temp, _, coolingFactor := findTempParameters(&p, r)
+	initialScore := WholeLayoutCost(&p)
 
-	score := WholeLayoutCost(&p)
-	fmt.Printf("initial score: %f\n", score)
+	msg.MainChannel <- msg.ThreadMessage{
+		ThreadID: id,
+		Message: fmt.Sprintf(
+			"Started SA with initial score of %f\n", initialScore,
+		),
+	}
 
-	for range cf.NumAnnealingSteps {
+	for range cfg.NumAnnealingSteps {
 		i := r.IntN(numSymbols)
 		j := r.IntN(numSymbols)
 
@@ -336,21 +356,37 @@ func RunAnnealing(
 		temp *= coolingFactor
 	}
 
-	fmt.Printf("final score: %f\t", WholeLayoutCost(&p))
-	fmt.Printf("|\tlayout: %v\n", p.Layout)
+	finalScore := WholeLayoutCost(&p)
+
+	endMsg := msg.ThreadMessage{
+		ThreadID: id,
+		Message:  msg.FormatFinalMessage(finalScore, &p.Layout),
+	}
+
+	msg.MainChannel <- endMsg
 }
 
 // Used for remarkable layouts to dig deeper if possible.
 func ProbeRegionGreedy(
 	p AnnealingInputs,
+	id int,
 	r *rand.Rand,
+	wg *sync.WaitGroup,
 ) {
 
-	score := WholeLayoutCost(&p)
-	fmt.Printf("initial score: %f\n", score)
+	defer wg.Done()
+
+	initialScore := WholeLayoutCost(&p)
+
+	msg.MainChannel <- msg.ThreadMessage{
+		ThreadID: id,
+		Message: fmt.Sprintf(
+			"Started SA with initial score of %f\n", initialScore,
+		),
+	}
 
 	// Most of these steps are probably a waste of compute.
-	for range cf.NumAnnealingSteps {
+	for range cfg.NumAnnealingSteps {
 		i := r.IntN(numSymbols)
 		j := r.IntN(numSymbols)
 
@@ -375,6 +411,12 @@ func ProbeRegionGreedy(
 		}
 	}
 
-	fmt.Printf("final score: %f\t", WholeLayoutCost(&p))
-	fmt.Printf("|\tlayout: %v\n", p.Layout)
+	finalScore := WholeLayoutCost(&p)
+
+	endMsg := msg.ThreadMessage{
+		ThreadID: id,
+		Message:  msg.FormatFinalMessage(finalScore, &p.Layout),
+	}
+
+	msg.MainChannel <- endMsg
 }
