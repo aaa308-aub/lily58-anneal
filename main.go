@@ -8,13 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aaa308-aub/lily58-anneal/annealing"
+	"github.com/aaa308-aub/lily58-anneal/anneal"
 	"github.com/aaa308-aub/lily58-anneal/assets"
 	msg "github.com/aaa308-aub/lily58-anneal/assets/messages"
 	cfg "github.com/aaa308-aub/lily58-anneal/config"
 )
 
-var validFlagsMode = map[string]struct{}{
+var modes = map[string]struct{}{
 	"anneal": {}, "bruteforce": {},
 }
 
@@ -22,89 +22,95 @@ func main() {
 
 	const mode = cfg.Mode
 
-	if _, ok := validFlagsMode[mode]; !ok {
+	if _, ok := modes[mode]; !ok {
 		panic(fmt.Errorf("invalid mode set (%q)", mode))
 	}
 
-	const numSymbols = cfg.NumSymbols
+	const nSym = cfg.NumSymbols
 
-	{ // Closure hides numKeysIncluded.
-		numKeysIncluded := 0
-		for _, key := range cfg.KeyInfos {
-			if key.AssignedFinger != cfg.FingerNil {
-				numKeysIncluded++
+	{ // Closure hides nKeysTargetted.
+		nKeysTargetted := 0
+		for _, key := range cfg.KeysAll {
+			if key.Fin != cfg.FingerNil {
+				nKeysTargetted++
 			}
 		}
 
-		if numKeysIncluded < 3 || numKeysIncluded > 29 {
+		if nKeysTargetted < 3 || nKeysTargetted > 29 {
 			panic(fmt.Errorf(
 				"number of included keys (%d) must be between 3 and 29 inclusive",
-				numKeysIncluded,
+				nKeysTargetted,
 			))
 		}
 
-		if numKeysIncluded != numSymbols {
+		if nKeysTargetted != nSym {
 			panic(fmt.Errorf(
 				"number of included keys (%d) is different from number of symbols (%d)",
-				numKeysIncluded,
-				numSymbols,
+				nKeysTargetted,
+				nSym,
 			))
 		}
 	}
 
-	const langDataFileName = cfg.TargetLanguageCode + ".tsv" // The same for all N-grams.
+	const fileName = cfg.TargetLanguageCode + ".tsv" // The same for all N-grams.
+	var syms = cfg.SymbolsArr
 
-	langDataFilePath := path.Join("assets", "counts", "monograms", langDataFileName)
-	var monogramFreqs [numSymbols]float32
-	err := assets.GetMonogramData(langDataFilePath, cfg.TargetSymbols[:], monogramFreqs[:])
+	filePath := path.Join("assets", "counts", "monograms", fileName)
+	var monoFreqs [nSym]float32
+	err := assets.GetMonogramData(filePath, syms[:], monoFreqs[:])
 	if err != nil {
 		panic(fmt.Errorf(
 			"failed to parse monogram data: %w",
 			err,
 		))
 	}
-	for i, freq := range monogramFreqs {
+	for i, freq := range monoFreqs {
 		if freq == 0 {
 			panic(fmt.Errorf(
 				"found symbol (%q) with no monogram data, may not belong to language",
-				cfg.TargetSymbols[i],
+				syms[i],
 			))
 		}
 	}
 
-	langDataFilePath = path.Join("assets", "counts", "bigrams", langDataFileName)
-	var bigramFreqs [numSymbols * numSymbols]float32
-	err = assets.GetBigramData(langDataFilePath, cfg.TargetSymbols[:], bigramFreqs[:])
-	if err != nil {
-		panic(fmt.Errorf(
-			"failed to parse bigram data: %w",
-			err,
-		))
-	}
-	// Symmetrize matrix by aggregating (i,j) and (j,i).
-	for i := range numSymbols {
-		for j := i + 1; j < numSymbols; j++ {
-			entryIndex := numSymbols*i + j
-			transposedIndex := numSymbols*j + i
-			aggregate := bigramFreqs[entryIndex] + bigramFreqs[transposedIndex]
+	var biFreqs [nSym][nSym]float32
+	{ // Closure hides biFreqsFlat.
+		filePath = path.Join("assets", "counts", "bigrams", fileName)
+		// Matrix biFreqs is flattened at first for easier coupling in assets.go.
+		var biFreqsFlat [nSym * nSym]float32
+		err = assets.GetBigramData(filePath, syms[:], biFreqsFlat[:])
+		if err != nil {
+			panic(fmt.Errorf(
+				"failed to parse bigram data: %w",
+				err,
+			))
+		}
 
-			// Assign to both sides
-			bigramFreqs[entryIndex] = aggregate
-			bigramFreqs[transposedIndex] = aggregate
+		// Unflatten matrix and symmetrize it by aggregating (i,j) and (j,i).
+		for i := range nSym {
+			for j := i + 1; j < nSym; j++ {
+				idx := nSym*i + j
+				idxTrans := nSym*j + i
+				aggregate := biFreqsFlat[idx] + biFreqsFlat[idxTrans]
+
+				// Assign to both sides
+				biFreqs[i][j] = aggregate
+				biFreqs[j][i] = aggregate
+			}
 		}
 	}
 
-	type trigramInfo = assets.TrigramInfo
-	langDataFilePath = path.Join("assets", "counts", "trigrams", langDataFileName)
-	const numTopTrigrams = cfg.NumTopTrigrams
-	var trigramInfos [numTopTrigrams]trigramInfo
-	var symbolToTrigrams [numSymbols]uint64
+	type trigram = assets.TrigramT
+	filePath = path.Join("assets", "counts", "trigrams", fileName)
+	const nTrigrams = cfg.NumTopTrigrams
+	var trigrams [nTrigrams]trigram
+	var symToTrigs [nSym]uint64
 	if !cfg.IgnoreTrigrams {
 		err = assets.GetTrigramData(
-			langDataFilePath,
-			cfg.TargetSymbols[:],
-			trigramInfos[:],
-			numTopTrigrams,
+			filePath,
+			syms[:],
+			trigrams[:],
+			nTrigrams,
 		)
 		if err != nil {
 			panic(fmt.Errorf(
@@ -114,29 +120,26 @@ func main() {
 		}
 
 		assets.MapSymbolsToTrigrams(
-			symbolToTrigrams[:],
-			trigramInfos[:],
+			symToTrigs[:],
+			trigrams[:],
 		)
 	}
 
 	// Filter out the excluded keys.
-	const numKeys = cfg.NumKeys
-	var keys [numSymbols]cfg.KeyInfo
-	for i, j := 0, 0; i < numKeys; i++ {
-		key := cfg.KeyInfos[i]
-		if key.AssignedFinger != cfg.FingerNil {
+	const nKeyAll = cfg.NumKeysAll
+	var keys [nSym]cfg.KeyT
+	for i, j := 0, 0; i < nKeyAll; i++ {
+		key := cfg.KeysAll[i]
+		if key.Fin != cfg.FingerNil {
 			keys[j] = key
 			j++
 		}
 	}
 
-	layout := func() [numSymbols]int { // equals [0, 1, 2... numSymbols-1].
-		var l [numSymbols]int
-		for i := range l {
-			l[i] = i
-		}
-		return l
-	}()
+	var layout [nSym]int // equals [0, 1, 2... numSymbols-1].
+	for i := range layout {
+		layout[i] = i
+	}
 
 	// Note: A layout could mean either a mapping of keys to symbols or a
 	// mapping of symbols to keys (it's a bijection). So to be clear, if
@@ -146,38 +149,39 @@ func main() {
 	case "anneal":
 		{
 
-			var printerWG sync.WaitGroup
-			var workerWG sync.WaitGroup
-			printerWG.Add(1)
-			go msg.PrintMessages(msg.MainChannel, &printerWG)
+			msgChan := msg.MainChannel
+			var wgPrint sync.WaitGroup
+			var wgWork sync.WaitGroup
+			wgPrint.Add(1)
+			go msg.PrintMessages(msgChan, &wgPrint)
 
 			seed := uint64(time.Now().UnixNano())
 			for id := range runtime.NumCPU() {
 
 				stream := uint64(id)
 				source := rand.NewPCG(seed, stream)
-				localRand := rand.New(source)
+				r := rand.New(source)
 
-				localRand.Shuffle(numSymbols, func(i, j int) {
+				r.Shuffle(nSym, func(i, j int) {
 					layout[i], layout[j] = layout[j], layout[i]
 				})
 
-				annealingInputs := annealing.AnnealingInputs{
-					Layout:           layout,
-					KeyInfos:         keys,
-					MonogramFreqs:    monogramFreqs,
-					BigramFreqs:      bigramFreqs,
-					TrigramInfos:     trigramInfos,
-					SymbolToTrigrams: symbolToTrigrams,
+				in := anneal.AnnealInputs{
+					Layout:     layout,
+					Keys:       keys,
+					MonoFreqs:  monoFreqs,
+					BiFreqs:    biFreqs,
+					Trigrams:   trigrams,
+					SymToTrigs: symToTrigs,
 				}
 
-				workerWG.Add(1)
-				go annealing.RunAnnealing(annealingInputs, id, localRand, &workerWG)
+				wgWork.Add(1)
+				go anneal.RunAnnealing(in, id, r, &wgWork)
 			}
 
-			workerWG.Wait()
+			wgWork.Wait()
 			close(msg.MainChannel)
-			printerWG.Wait()
+			wgPrint.Wait()
 		}
 	case "bruteforce": // W.I.P.
 		{

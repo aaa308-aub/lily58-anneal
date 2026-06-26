@@ -9,13 +9,13 @@ import (
 	"strings"
 )
 
-func openLanguageDataFile(targetLanguagePath string) (*os.File, error) {
+func openDataFile(filePath string) (*os.File, error) {
 
-	file, err := os.Open(targetLanguagePath)
+	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open language data file: %w", err)
 	}
-	if filepath.Ext(targetLanguagePath) != ".tsv" {
+	if filepath.Ext(filePath) != ".tsv" {
 		return nil, fmt.Errorf("target language data file must be a .tsv file")
 	}
 	return file, nil
@@ -23,14 +23,14 @@ func openLanguageDataFile(targetLanguagePath string) (*os.File, error) {
 
 func parseNgramLine(
 	line string,
-	lineNumber int,
+	lineIdx int,
 	nGramSize int,
 ) ([]rune, int, error) {
 
 	if line == "" {
 		return nil, 0, fmt.Errorf(
 			"found empty line (%d) in vetted data file outside of EOF",
-			lineNumber,
+			lineIdx,
 		)
 	}
 
@@ -38,7 +38,7 @@ func parseNgramLine(
 	if len(parts) != 2 {
 		return nil, 0, fmt.Errorf(
 			"found line (%d) in vetted data file with %d parts, expected only 2",
-			lineNumber,
+			lineIdx,
 			len(parts),
 		)
 	}
@@ -47,7 +47,7 @@ func parseNgramLine(
 	if len(runes) != nGramSize {
 		return nil, 0, fmt.Errorf(
 			"found line (%d) in vetted data file with a %d-rune n-gram, expected %d",
-			lineNumber,
+			lineIdx,
 			len(runes),
 			nGramSize,
 		)
@@ -57,7 +57,7 @@ func parseNgramLine(
 	if err != nil {
 		return nil, 0, fmt.Errorf(
 			"failed to parse n-gram count via strconv.Atoi in line %d: %w",
-			lineNumber,
+			lineIdx,
 			err,
 		)
 	}
@@ -65,67 +65,67 @@ func parseNgramLine(
 		return nil, 0, fmt.Errorf(
 			"found unexpected, non-positive n-gram count (%d) in line %d",
 			count,
-			lineNumber,
+			lineIdx,
 		)
 	}
 
 	return runes, count, nil
 }
 
-func turnCountsToFreqs(counts []float32) error {
+func turnCountsToFreqs(counts, freqs []float32) error {
 
-	totalCount := float32(0)
-	for _, count := range counts {
-		totalCount += count
+	total := float32(0)
+	for _, c := range counts {
+		total += c
 	}
 
-	if totalCount < 0 {
+	if total < 0 {
 		return fmt.Errorf(
 			"total count of n-grams is negative, overflow possible but unlikely cause",
 		)
 	}
 
-	if totalCount == 0 {
+	if total == 0 {
 		return fmt.Errorf(
 			"total count of n-grams is zero, data file may be empty",
 		)
 	}
 
-	for i, count := range counts {
-		counts[i] = count / totalCount
+	for i, c := range counts {
+		freqs[i] = c / total
 	}
+
 	return nil
 }
 
-// Takes a monogram count data path, the target symbols, and a slice of
-// monogram frequencies. Fills the slice for each symbol, matching
-// by index.
+// Frequencies match symbols by index.
 func GetMonogramData(
-	targetLanguagePath string,
-	targetSymbols []rune,
-	monogramFreqs []float32,
+	filePath string,
+	syms []rune,
+	freqs []float32,
 ) error {
 
-	file, err := openLanguageDataFile(targetLanguagePath)
+	file, err := openDataFile(filePath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	scanner, lineNumber := bufio.NewScanner(file), 0
+	scanner, lineIdx := bufio.NewScanner(file), 0
+	counts := make([]float32, len(freqs))
 	for scanner.Scan() {
-		lineNumber++
+		lineIdx++
 
 		line := scanner.Text()
-		runes, count, err := parseNgramLine(line, lineNumber, 1)
+		runes, count, err := parseNgramLine(line, lineIdx, 1)
 		if err != nil {
 			return err
 		}
 
 		monogram := runes[0]
-		for i, symbol := range targetSymbols { // A simple linear search is fine here.
+		for i, symbol := range syms { // A simple linear search is fine here.
 			if symbol == monogram {
-				monogramFreqs[i] = float32(count)
+				counts[i] = float32(count)
 				break
 			}
 		}
@@ -135,135 +135,132 @@ func GetMonogramData(
 		return fmt.Errorf("non-EOF error encountered by scanner: %w", err)
 	}
 
-	err = turnCountsToFreqs(monogramFreqs)
+	err = turnCountsToFreqs(counts, freqs)
 	return err
 }
 
-// Takes a bigram count data path, the target symbols, and a slice of
-// bigram frequencies to fill.
-//
-// This slice is treated as a flattened 2D matrix by cross-tabulating
-// the target symbols with itself for fast bigram frequency lookup.
+// Slice of frequencies should view a flattened 2D LUT that
+// cross-tabulates slice of symbols with itself.
 func GetBigramData(
-	targetLanguagePath string,
-	targetSymbols []rune,
-	bigramFreqs []float32,
+	filePath string,
+	syms []rune,
+	freqs []float32,
 ) error {
 
-	file, err := openLanguageDataFile(targetLanguagePath)
+	file, err := openDataFile(filePath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	numSymbols := len(targetSymbols)
+	nSym := len(syms)
 
-	symbolToIndex := make(map[rune]int, numSymbols)
-	for i, symbol := range targetSymbols {
-		symbolToIndex[symbol] = i
+	symToIdx := make(map[rune]int, nSym)
+	for i, sym := range syms {
+		symToIdx[sym] = i
 	}
 
-	scanner, lineNumber := bufio.NewScanner(file), 0
+	scanner, lineIdx := bufio.NewScanner(file), 0
+	counts := make([]float32, len(freqs))
 	for scanner.Scan() {
-		lineNumber++
+		lineIdx++
 
 		line := scanner.Text()
-		runes, count, err := parseNgramLine(line, lineNumber, 2)
+		runes, count, err := parseNgramLine(line, lineIdx, 2)
 		if err != nil {
 			return err
 		}
 
-		index1, ok1 := symbolToIndex[runes[0]]
-		index2, ok2 := symbolToIndex[runes[1]]
-		if !ok1 || !ok2 || index1 == index2 { // Bigram symbols must be distinct.
+		i, ok1 := symToIdx[runes[0]]
+		j, ok2 := symToIdx[runes[1]]
+		if !ok1 || !ok2 || i == j { // Bigram symbols must be distinct.
 			continue
 		}
 
-		matrixIndex := numSymbols*index1 + index2
-		bigramFreqs[matrixIndex] = float32(count)
+		idx := nSym*i + j
+		counts[idx] = float32(count)
 	}
 
 	if err = scanner.Err(); err != nil {
 		return fmt.Errorf("non-EOF error encountered by scanner: %w", err)
 	}
 
-	err = turnCountsToFreqs(bigramFreqs)
+	err = turnCountsToFreqs(counts, freqs)
 	return err
 }
 
-// The ordering is required by the engine. There's no way around this.
-type TrigramInfo struct {
-	Freq           float32
-	OrderedSymbols [3]int8
+// Syms field should contain the symbols (by index) in their
+// order within trigram.
+type TrigramT struct {
+	Freq float32
+	Syms [3]int8
 }
 
-// Takes a trigram count data path, the target symbols, and a slice of
-// trigramInfos to fill with the top X trigrams, where X = numTopTrigrams.
 func GetTrigramData(
-	targetLanguagePath string,
-	targetSymbols []rune,
-	trigramInfos []TrigramInfo,
-	numTopTrigrams int8,
+	filePath string,
+	syms []rune,
+	trigrams []TrigramT,
+	nTrigram int8,
 ) error {
 
-	file, err := openLanguageDataFile(targetLanguagePath)
+	file, err := openDataFile(filePath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	numSymbols := len(targetSymbols)
+	nSym := len(syms)
 
-	symbolToIndex := make(map[rune]int8, numSymbols)
-	for i, symbol := range targetSymbols {
-		symbolToIndex[symbol] = int8(i)
+	symToIdx := make(map[rune]int8, nSym)
+	for i, symbol := range syms {
+		symToIdx[symbol] = int8(i)
 	}
 
-	trigrams := make([][3]int8, numTopTrigrams)
-	counts := make([]float32, numTopTrigrams)
-	countsIndex := int8(0) // lineNumber can't be used if some trigrams are skipped.
-	scanner, lineNumber := bufio.NewScanner(file), 0
-	for scanner.Scan() && countsIndex < numTopTrigrams {
-		lineNumber++
+	trigramSyms := make([][3]int8, nTrigram)
+	counts := make([]float32, nTrigram)
+	countsIdx := int8(0) // lineIdx can't be used if some trigrams are skipped.
+	scanner, lineIdx := bufio.NewScanner(file), 0
+	for scanner.Scan() && countsIdx < nTrigram {
+		lineIdx++
 
 		line := scanner.Text()
-		runes, count, err := parseNgramLine(line, lineNumber, 3)
+		runes, count, err := parseNgramLine(line, lineIdx, 3)
 		if err != nil {
 			return err
 		}
 
-		index1, ok1 := symbolToIndex[runes[0]]
-		index2, ok2 := symbolToIndex[runes[1]]
-		index3, ok3 := symbolToIndex[runes[2]]
+		i, ok1 := symToIdx[runes[0]]
+		j, ok2 := symToIdx[runes[1]]
+		k, ok3 := symToIdx[runes[2]]
 		if !ok1 || !ok2 || !ok3 {
 			continue
 		}
-		// A trigram with non-distinct symbols is invalid and must be ignored.
-		if index1 == index2 || index1 == index3 || index2 == index3 {
+		// A trigram with non-distinct symbols is invalid and should be ignored.
+		if i == j || i == k || j == k {
 			continue
 		}
 
-		trigrams[countsIndex] = [3]int8{index1, index2, index3}
-		counts[countsIndex] = float32(count)
-		countsIndex++
+		trigramSyms[countsIdx] = [3]int8{i, j, k}
+		counts[countsIdx] = float32(count)
+		countsIdx++
 	}
 
 	// Notice: the loop could theoretically and silently end before
-	// countsIndex reaches numTopTrigrams. It won't break the
-	// logic, just that the number of trigrams recorded is less
-	// than requested.
+	// countsIdx reaches nTrigrams. It won't break the logic, just
+	// that the number of trigrams recorded is less than requested.
 
 	if err = scanner.Err(); err != nil {
 		return fmt.Errorf("non-EOF error encountered by scanner: %w", err)
 	}
 
-	err = turnCountsToFreqs(counts)
+	freqs := make([]float32, len(counts))
+	err = turnCountsToFreqs(counts, freqs)
 	if err != nil {
 		return err
 	}
 
-	for i := range numTopTrigrams {
-		trigramInfos[i] = TrigramInfo{counts[i], trigrams[i]}
+	for i := range nTrigram {
+		trigrams[i] = TrigramT{freqs[i], trigramSyms[i]}
 	}
 
 	return nil
@@ -272,15 +269,15 @@ func GetTrigramData(
 // Takes trigramInfos from GetTrigramData to map each symbol using a bitmask
 // to the indices of trigrams it belongs to.
 func MapSymbolsToTrigrams(
-	symbolToTrigrams []uint64,
-	trigramInfos []TrigramInfo,
+	symToTrigs []uint64,
+	trigrams []TrigramT,
 ) {
 
-	for i, trigram := range trigramInfos {
+	for i, t := range trigrams {
 		bit := uint64(1 << i)
 
-		for _, symbol := range trigram.OrderedSymbols {
-			symbolToTrigrams[symbol] |= bit
+		for _, sym := range t.Syms {
+			symToTrigs[sym] |= bit
 		}
 	}
 }

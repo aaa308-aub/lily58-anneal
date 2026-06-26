@@ -3,63 +3,65 @@ package config
 import "unicode"
 
 const (
-	Mode                 = "anneal" // "anneal" | "bruteforce".
-	IgnoreTrigrams       = false    // true | false.
-	ExcludedKeySymbol    = '·'      // Safe to change to anything you want.
-	NumAnnealingSteps    = 50_000_000
-	NumKeys              = 29
-	NumTopTrigrams       = int8(64)
-	PenaltyStretchScaler = float32(0.5) // Do not raise too aggressively.
+	Mode              = "anneal" // "anneal" | "bruteforce".
+	IgnoreTrigrams    = false    // true | false.
+	ExcludedKeySymbol = '·'
+	NumAnnealSteps    = 50_000_000
+	NumKeysAll        = 29
+	NumSymbols        = len(symbolsStr)
+	NumTopTrigrams    = int8(64)
+	StretchCostScaler = float32(0.5) // Do not raise too aggressively.
 )
 
-// Small 2D LUT for penalty of fingers used to type bigram. Used to
-// only punish same-finger bigrams by default.
-var BigramFingersPenalty = [NumFingers * NumFingers]float32{
-	2, 1, 1,
-	1, 2, 1,
-	1, 1, 2,
+// 2D LUT for penalty of fingers used to type bigram. Punishes
+// same-finger bigrams (SFBs) only by default.
+var SFBCosts = [NumFingers][NumFingers]float32{
+	{2, 1, 1},
+	{1, 2, 1},
+	{1, 1, 2},
 }
 
-// Small 2D LUT for the max stretch distance allowed for bigrams
-// not to be punished, given two fingers. The values are squared to
+// 2D LUT for the max stretch distance allowed for bigrams not to
+// be punished, given two fingers. The values are squared to
 // prevent wasting cycles on math.Sqrt function. Matrix must be
 // symmetric because order of fingers/symbols in bigrams doesn't
 // matter.
-var StretchLimitsSquared = [NumFingers * NumFingers]float32{
-	0, 1.56, 10.56,
-	1.56, 0, 6.25,
-	10.56, 6.25, 0,
+var MaxStretchesSq = [NumFingers][NumFingers]float32{
+	{0, 1.56, 10.56},
+	{1.56, 0, 6.25},
+	{10.56, 6.25, 0},
 }
 
-// Small 3D LUT for trigram inward roll (ring->middle->index) reward
-// multiplier, and a smaller one for outward rolls (index->middle->ring).
-var TrigramFingersReward = [NumFingers * NumFingers * NumFingers]float32{
-	0, 0, 0,
-	0, 0, 7.5,
-	0, 0, 0,
-	0, 0, 0,
-	0, 0, 0,
-	0, 0, 0,
-	0, 0, 0,
-	2.5, 0, 0,
-	0, 0, 0,
-}
+// 3D LUT for trigram inward roll (ring->middle->index) reward
+// multiplier. Other distinct-finger trigrams are also rewarded slightly.
+var TrigramRewards = func() [NumFingers][NumFingers][NumFingers]float32 {
 
-type Finger uint8
+	var lut [NumFingers][NumFingers][NumFingers]float32
+	lut[FingerRing][FingerMiddle][FingerIndex] = 7.5 // R->M->I
+	lut[FingerIndex][FingerMiddle][FingerRing] = 2.5 // I->M->R
+	/* May add later.
+	lut[FingerMiddle][FingerRing][FingerIndex] = 2.5 // M->R->I
+	lut[FingerMiddle][FingerIndex][FingerRing] = 2.5 // M->I->R
+	*/
+	return lut
+}()
+
+type FingerT uint8
 
 const (
-	FingerRing   Finger = iota // 0
-	FingerMiddle               // 1
-	FingerIndex                // 2
-	NumFingers                 // 3
-	FingerNil                  // 4
+	FingerRing   FingerT = iota // 0
+	FingerMiddle                // 1
+	FingerIndex                 // 2
+	NumFingers                  // 3
+	FingerNil                   // 4
 	// Typically the null-value is the zero-value, but there are good
 	// reasons to make an exception here, for LUTs involving fingers.
 )
 
-type KeyInfo struct {
-	X, Y, Weight   float32
-	AssignedFinger Finger
+// X, Y: coordinates, W: Key weight, F: Finger assigned.
+type KeyT struct {
+	X, Y, W float32
+	Fin     FingerT
 }
 
 // Do not touch above this line unless you know what you're doing.
@@ -68,12 +70,12 @@ type KeyInfo struct {
 // To re-include it, assign it to a valid finger.
 //
 // Note: the key with coordinates 4x, -0.58y (see images in doc) is
-//       considered Row 4, Column 4 for simplicity.
+// considered Row 4, Column 4 for simplicity.
 //
 // If you want to adjust a key's weight, change its 3rd field.
 // For example, the weight of {0, 2, 1.5, FingerMiddle} is 1.5.
 
-var KeyInfos = [NumKeys]KeyInfo{
+var KeysAll = [NumKeysAll]KeyT{
 	// Row 0
 	{-2, 1.67, 2.5, FingerMiddle}, {-1, 1.76, 2, FingerMiddle}, {0, 2, 1.5, FingerMiddle}, {1, 2.08, 2, FingerIndex}, {2, 2, 2.5, FingerIndex}, {3, 1.92, 3, FingerIndex},
 	// Row 1
@@ -85,40 +87,30 @@ var KeyInfos = [NumKeys]KeyInfo{
 	// Row 4 -- keys reserved for thumb excluded by default
 	{0.5, -2, 2.5, FingerMiddle}, {1.5, -2, 2.5, FingerIndex}, {2.5, -2.08, 3, FingerNil}, {3.8, -2.09, 3.5, FingerNil}, {4, -0.58, 3.5, FingerIndex},
 
-	// Row/Column guide:
+	// Row/Column guide:                              Blank layout (scratch):
 	//
-	// [0,0][0,1][0,2][0,3][0,4][0,5]
-	// [1,0][1,1][1,2][1,3][1,4][1,5]
-	// [2,0][2,1][2,2][2,3][2,4][2,5] [4,4]
-	// [3,0][3,1][3,2][3,3][3,4][3,5]
-	//             [4,0][4,1][4,2][4,3]
-	//
-	// A minimalist blank layout you can use as scratch:
-	//
-	// [][][][][][]
-	// [][][][][][]
-	// [][][][][][] []
-	// [][][][][][]
-	//      [][][][]
+	// [0,0][0,1][0,2][0,3][0,4][0,5]                   [][][][][][]
+	// [1,0][1,1][1,2][1,3][1,4][1,5]                   [][][][][][]
+	// [2,0][2,1][2,2][2,3][2,4][2,5] [4,4]             [][][][][][] []
+	// [3,0][3,1][3,2][3,3][3,4][3,5]                   [][][][][][]
+	//             [4,0][4,1][4,2][4,3]                      [][][][]
 }
 
 // Place your symbols you want mapped below. Please make sure the symbols
 // belong to the language you chose, and that their number is the same as
 // the number of keys included. Otherwise, an error will occur.
 
-const targetSymbolsString = "abcdefghijklmnopqrstuvwxyz"
+const symbolsStr = "abcdefghijklmnopqrstuvwxyz"
 
 // For the available languages and their alphabets, see the README.
 
 const TargetLanguageCode = "en"
 
-// Don't touch these variables below unless you know what you're doing.
+// Don't touch below this line unless you know what you're doing.
 
-const NumSymbols = len(targetSymbolsString)
-
-var TargetSymbols = func() [NumSymbols]rune {
+var SymbolsArr = func() [NumSymbols]rune {
 	var ts [NumSymbols]rune
-	for i, symbol := range targetSymbolsString {
+	for i, symbol := range symbolsStr {
 		ts[i] = unicode.ToLower(symbol)
 	}
 	return ts
