@@ -276,6 +276,10 @@ func MapSymbolsToTrigrams(
 	for i, t := range trigrams {
 		bit := uint64(1 << i)
 
+		if t == (TrigramT{}) {
+			break
+		}
+
 		for _, sym := range t.Syms {
 			symToTrigs[sym] |= bit
 		}

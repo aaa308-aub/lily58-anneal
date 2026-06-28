@@ -17,14 +17,6 @@ type ThreadMessageT struct {
 	Msg string
 }
 
-// Global channels are generally discouraged, but I prefer careful
-// lifetime and ownership over having to pass it everywhere. One
-// man's bad practice is another man's idiom. If you are forking
-// this codebase and dislike that, I do apologize for the
-// inconvenience of having to rewrite this.
-
-var MainChannel = make(chan ThreadMessageT, 100)
-
 func (m ThreadMessageT) Format() string {
 
 	return "[SA Thread #" + strconv.Itoa(m.ID) + "] " + m.Msg
@@ -120,7 +112,7 @@ func FormatLayout(layout *[nSym]int) string {
 	return str
 }
 
-// Does not include initial layout because it's irrelevant.
+// Does not format or include initial layout because it's irrelevant.
 func FormatInitialMessage(
 	score float32,
 ) string {

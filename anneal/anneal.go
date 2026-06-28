@@ -13,13 +13,12 @@ import (
 )
 
 const (
-	nSym     = cfg.NumSymbols // Assumed equal to number of included keys.
+	nSym     = cfg.NumSymbols
 	nTrigram = cfg.NumTopTrigrams
 	noTrigs  = cfg.IgnoreTrigrams
 	nSteps   = cfg.NumAnnealSteps
 )
 
-var msgChan = msg.MainChannel
 var sfbCosts = cfg.SFBCosts
 var maxStretchesSq = cfg.MaxStretchesSq
 var trigRewards = cfg.TrigramRewards
@@ -27,7 +26,13 @@ var trigRewards = cfg.TrigramRewards
 type keyT = cfg.KeyT
 type trigramT = assets.TrigramT
 
-// Purpose: deep-copying data to prevent cache contention between goroutines.
+// All goroutines have their own copies of the data to prevent
+// fighting for it.
+//
+// Initially thought to be fixing maybe a cache contention issue or
+// pointer chasing -- turns out that the bottleneck was actually the
+// CPU's cache coherence protocol stalling the program because the
+// data is not seen as read-only.
 type AnnealInputs struct {
 	Layout     [nSym]int
 	Keys       [nSym]keyT
@@ -191,12 +196,25 @@ func trigramsReward(
 		idx := bits.TrailingZeros64(bitmask)
 		t := &trigrams[idx]
 
-		f1 := keys[layout[t.Syms[0]]].Fin
-		f2 := keys[layout[t.Syms[1]]].Fin
-		f3 := keys[layout[t.Syms[2]]].Fin
+		ki1, ki2, ki3 := layout[t.Syms[0]], layout[t.Syms[1]], layout[t.Syms[2]]
+		f1, f2, f3 := keys[ki1].Fin, keys[ki2].Fin, keys[ki3].Fin
 
-		reward := trigRewards[f1][f2][f3]
-		total += t.Freq * reward
+		// Must prevent rewarding trigrams that demand too much
+		// stretch. It seems that punishing bigram stretches is
+		// not preventing this enough on its own.
+
+		distSq1to2 := distsSq[ki1][ki2]
+		maxStretchSq1to2 := maxStretchesSq[f1][f2]
+		if distSq1to2 > maxStretchSq1to2 {
+			continue
+		}
+		distSq2to3 := distsSq[ki2][ki3]
+		maxStretchSq2to3 := maxStretchesSq[f2][f3]
+		if distSq2to3 > maxStretchSq2to3 {
+			continue
+		}
+
+		total += t.Freq * trigRewards[f1][f2][f3]
 	}
 	return total
 }
@@ -271,6 +289,7 @@ func findTempParameters(
 	// Tested different sample sizes and the average seems to converge
 	// quickly for 1'000 bad swaps, so 10'000 is sufficient.
 	for badSwapsCount := 0; badSwapsCount < 10000; {
+
 		i := r.IntN(nSym)
 		j := r.IntN(nSym)
 
@@ -310,26 +329,26 @@ func findTempParameters(
 // Be careful to input the worker goroutine's waitgroup, not the printer/logger.
 func RunAnnealing(
 	p AnnealInputs,
-	id int,
 	r *rand.Rand,
+	id int,
+	ch chan msg.ThreadMessageT,
 	wg *sync.WaitGroup,
 ) {
 
 	defer wg.Done()
 
 	scoreI := WholeLayoutCost(&p)
-	msgChan <- msg.ThreadMessageT{
+	ch <- msg.ThreadMessageT{
 		ID:  id,
 		Msg: msg.FormatInitialMessage(scoreI),
 	}
 
 	temp, _, coolingFactor := findTempParameters(&p, r)
 	for range nSteps {
+
 		i := r.IntN(nSym)
 		j := r.IntN(nSym)
-
 		for i == j {
-			// Again, this may be redundant.
 			switch r.IntN(2) {
 			case 0:
 				i = r.IntN(nSym)
@@ -352,7 +371,7 @@ func RunAnnealing(
 	}
 
 	scoreF := WholeLayoutCost(&p)
-	msgChan <- msg.ThreadMessageT{
+	ch <- msg.ThreadMessageT{
 		ID:  id,
 		Msg: msg.FormatFinalMessage(scoreF, &p.Layout),
 	}
@@ -361,26 +380,27 @@ func RunAnnealing(
 // Used for remarkable layouts to dig deeper if possible.
 func ProbeRegionGreedy(
 	p AnnealInputs,
-	id int,
 	r *rand.Rand,
+	id int,
+	ch chan msg.ThreadMessageT,
 	wg *sync.WaitGroup,
 ) {
 
 	defer wg.Done()
 
 	scoreI := WholeLayoutCost(&p)
-	msgChan <- msg.ThreadMessageT{
+	ch <- msg.ThreadMessageT{
 		ID:  id,
 		Msg: msg.FormatInitialMessage(scoreI),
 	}
 
-	// Most of these steps are probably a waste of compute.
+	// Most of these steps are probably a waste of compute, but it's
+	// worth not missing anything.
 	for range nSteps {
+
 		i := r.IntN(nSym)
 		j := r.IntN(nSym)
-
 		for i == j {
-			// Again, this may be redundant.
 			switch r.IntN(2) {
 			case 0:
 				i = r.IntN(nSym)
@@ -401,7 +421,7 @@ func ProbeRegionGreedy(
 	}
 
 	scoreF := WholeLayoutCost(&p)
-	msgChan <- msg.ThreadMessageT{
+	ch <- msg.ThreadMessageT{
 		ID:  id,
 		Msg: msg.FormatFinalMessage(scoreF, &p.Layout),
 	}

@@ -15,7 +15,7 @@ procedure of development (oldest ``Problem`` to newest). It follows the format:
 ...
 ```
 
-#1\
+``#1``\
 The right hand is heavily taxed with both typing on the keyboard and navigating\
 with the mouse, leading to excessive hand movement between the two and\
 disrupting workflow.
@@ -28,7 +28,7 @@ speed for flow. Choose the Lily58 for its ergonomic design and ideal key count\
 of 29. It also supports key-map layering to accomodate more than 29 inputs.
 
 
-#2\
+``#2``\
 There is no one-handed Lily58 keyboard layout to be found online. A custom\
 layout must be made.
 
@@ -47,7 +47,7 @@ frequency. Use trigram data to reward (apply negative cost to) inward rolling\
 with fingers (``ring->middle->index``).
 
 
-#3\
+``#3``\
 Someone who's interested in their own one-handed Lily58 may use this engine,\
 but for a language different from English.
 
@@ -57,7 +57,7 @@ Engine supports any inputs/symbols. Written in Go to standardize symbols with\
 runes encoded in ``UTF-8``.
 
 
-#4\
+``#4``\
 N-gram data is required for solution proposed in ``#2.``
 
 Data must be from large sample sizes, especially for trigrams, because there\
@@ -100,7 +100,7 @@ informative, in case anyone wants to use these files themselves. The\
 initialization cost of turning them to frequencies is negligible.
 
 
-#5\
+``#5``\
 Southeast Asian countries like Japan, Korea and China practice typing very\
 different from other countries, like joining simple letters to form new ones,\
 leading to complications in n-gram data and what it may represent.
@@ -111,12 +111,11 @@ Removed n-gram data for Southeast Asian languages due to high language-specific\
 complexity that cannot be handled in this project, at least for the moment.
 
 
-#6\
+``#6``\
 Users should be able to easily change key configurations, the letters/symbols\
 to be mapped, and the target language.
 
-Configurations should be done at compile-time to bring data to the engine in\
-stack-allocated data structures and maximize performance.
+``No notable constraints.``
 
 Wrote config.go for easy configuration of key info (XY-coords, weights, finger\
 assignments), target language (``en``, ``fr``, ``de``, etc.) and target\
@@ -128,7 +127,7 @@ steps per run and thus my data structures must be data-oriented and mostly\
 stack-allocated.
 
 
-#7\
+``#7``\
 Bigram data must be stored in such a way that is data-oriented: the best\
 and fastest way the engine can access it.
 
@@ -149,7 +148,7 @@ they are ``a`` and ``c`` in this example, it will calculate the cost delta of\
 bigrams containing ``a`` and ``c`` only.
 
 
-#8\
+``#8``\
 Trigram data must be stored and accessed efficiently.
 
 There are over 17500 possible trigram combinations for 26 or more symbols.\
@@ -179,7 +178,7 @@ Rejected turning it into a Compressed Sparse Matrix (CSF) because it would lead\
 to pointer chasing and/or\ more expensive indexing.
 
 
-#9\
+``#9``\
 The engine uses bigram frequency data to punish same-finger bigrams and/or\
 stretches, regardless which key is pressed first. So the data should be for\
 unordered bigrams by aggregating ordered data (e.g.,``"ab" + "ba"``). The data\
@@ -209,9 +208,9 @@ also deal with double-counting of bigrams containing both swapped symbols.\
 Although time is wasted processing the zero-entries, it is negligible and\
 arguably necessary for readability and maintenance.
 
-#10\
+``#10``\
 The solution proposed in ``#8`` wastes a lot of memory and introduces an issue\
-with double-counting trigrams which happen to contain both swapped symbols.\
+with double-counting trigrams which happen to contain both swapped symbols.
 
 ``No notable constraints.``
 
@@ -235,7 +234,7 @@ our engine, by simply taking the union of their ``symbolToTrigram`` entries\
 64 to use this solution. This might be better for the engine to prioritize the\
 trigrams that matter the most, anyway.
 
-#11\
+``#11``\
 ``WholeCostLayout`` of output layout does not match the cost (score) that is\
 being calculated by adding ``deltaCost`` every swap. There is a logical error\
 somewhere.
@@ -249,3 +248,20 @@ problem ``#9``. ``WholeCostLayout`` is now almost equal to the output score,\
 with slight difference due to float32 rounding errors. I simply stopped adding\
 ``deltaCost`` to the score every swap (when it's accepted) because there's just\
 no need, and instead use ``WholeCostLayout``'s output to print the final score.
+
+``#12``\
+After testing some layouts and relying on human intuition, I believe that\
+inward rolls on trigrams (``ring->middle->index``) are not as important as\
+I first thought. Also, the algorithm is being rewarded for inward rolls with\
+symbols mapped too far apart. I thought that punishing stretches in\
+``BigramCost`` would be enough, since a trigram being frequent means that\
+its composited bigrams are also frequent.
+
+``No notable constraints.``
+
+Relaxed reward for inward rolls and began rewarding for trigrams pressed with\
+distinct fingers in general. Stopped rewarding trigrams that demand long\
+stretches with fingers. As expected, the extra branching and lesser reward\
+potential lead to a slight decrease in performance and an increase in final\
+layout score, but the actual quality of the final layouts rose noticeably which\
+is what really matters.

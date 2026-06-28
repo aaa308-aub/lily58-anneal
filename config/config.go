@@ -1,10 +1,12 @@
 package config
 
-import "unicode"
+import (
+	"fmt"
+	"unicode"
+)
 
 const (
-	Mode              = "anneal" // "anneal" | "bruteforce".
-	IgnoreTrigrams    = false    // true | false.
+	IgnoreTrigrams    = false // true | false.
 	ExcludedKeySymbol = '·'
 	NumAnnealSteps    = 50_000_000
 	NumKeysAll        = 29
@@ -27,9 +29,9 @@ var SFBCosts = [NumFingers][NumFingers]float32{
 // symmetric because order of fingers/symbols in bigrams doesn't
 // matter.
 var MaxStretchesSq = [NumFingers][NumFingers]float32{
-	{0, 1.56, 10.56},
+	{0, 1.56, 9},
 	{1.56, 0, 6.25},
-	{10.56, 6.25, 0},
+	{9, 6.25, 0},
 }
 
 // 3D LUT for trigram inward roll (ring->middle->index) reward
@@ -37,12 +39,10 @@ var MaxStretchesSq = [NumFingers][NumFingers]float32{
 var TrigramRewards = func() [NumFingers][NumFingers][NumFingers]float32 {
 
 	var lut [NumFingers][NumFingers][NumFingers]float32
-	lut[FingerRing][FingerMiddle][FingerIndex] = 7.5 // R->M->I
-	lut[FingerIndex][FingerMiddle][FingerRing] = 2.5 // I->M->R
-	/* May add later.
-	lut[FingerMiddle][FingerRing][FingerIndex] = 2.5 // M->R->I
-	lut[FingerMiddle][FingerIndex][FingerRing] = 2.5 // M->I->R
-	*/
+	lut[FingerRing][FingerMiddle][FingerIndex] = 5   // R->M->I
+	lut[FingerIndex][FingerMiddle][FingerRing] = 3.5 // I->M->R
+	lut[FingerMiddle][FingerRing][FingerIndex] = 3.5 // M->R->I
+	lut[FingerMiddle][FingerIndex][FingerRing] = 3.5 // M->I->R
 	return lut
 }()
 
@@ -109,9 +109,53 @@ const TargetLanguageCode = "en"
 // Don't touch below this line unless you know what you're doing.
 
 var SymbolsArr = func() [NumSymbols]rune {
-	var ts [NumSymbols]rune
-	for i, symbol := range symbolsStr {
-		ts[i] = unicode.ToLower(symbol)
+	var arr [NumSymbols]rune
+	for i, s := range symbolsStr {
+		arr[i] = unicode.ToLower(s)
 	}
-	return ts
+	return arr
+}()
+
+var KeysIncluded = func() [NumSymbols]KeyT {
+
+	nKeysIncluded := 0
+	for _, key := range KeysAll {
+		if key.Fin != FingerNil {
+			nKeysIncluded++
+		}
+	}
+
+	if nKeysIncluded < 3 || nKeysIncluded > 29 {
+		panic(fmt.Errorf(
+			"number of included keys (%d) must be between 3 and 29 inclusive",
+			nKeysIncluded,
+		))
+	}
+
+	if nKeysIncluded != NumSymbols {
+		panic(fmt.Errorf(
+			"number of included keys (%d) is different from number of symbols (%d)",
+			nKeysIncluded,
+			NumSymbols,
+		))
+	}
+
+	seen := make(map[KeyT]struct{}, NumSymbols)
+
+	var keys [NumSymbols]KeyT
+	for i, j := 0, 0; i < NumKeysAll; i++ {
+		key := KeysAll[i]
+		if key.Fin != FingerNil {
+
+			_, ok := seen[key]
+			if ok {
+				panic("found two keys in config with identical fields")
+			}
+
+			keys[j] = key
+			seen[key] = struct{}{}
+			j++
+		}
+	}
+	return keys
 }()

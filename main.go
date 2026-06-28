@@ -14,43 +14,11 @@ import (
 	cfg "github.com/aaa308-aub/lily58-anneal/config"
 )
 
-var modes = map[string]struct{}{
-	"anneal": {}, "bruteforce": {},
-}
-
 func main() {
-
-	const mode = cfg.Mode
-
-	if _, ok := modes[mode]; !ok {
-		panic(fmt.Errorf("invalid mode set (%q)", mode))
-	}
 
 	const nSym = cfg.NumSymbols
 
-	{ // Closure hides nKeysTargetted.
-		nKeysTargetted := 0
-		for _, key := range cfg.KeysAll {
-			if key.Fin != cfg.FingerNil {
-				nKeysTargetted++
-			}
-		}
-
-		if nKeysTargetted < 3 || nKeysTargetted > 29 {
-			panic(fmt.Errorf(
-				"number of included keys (%d) must be between 3 and 29 inclusive",
-				nKeysTargetted,
-			))
-		}
-
-		if nKeysTargetted != nSym {
-			panic(fmt.Errorf(
-				"number of included keys (%d) is different from number of symbols (%d)",
-				nKeysTargetted,
-				nSym,
-			))
-		}
-	}
+	// nSym == nKeysIncluded is checked within config.go which will panic if not.
 
 	const fileName = cfg.TargetLanguageCode + ".tsv" // The same for all N-grams.
 	var syms = cfg.SymbolsArr
@@ -67,7 +35,8 @@ func main() {
 	for i, freq := range monoFreqs {
 		if freq == 0 {
 			panic(fmt.Errorf(
-				"found symbol (%q) with no monogram data, may not belong to language",
+				"found symbol (%q) with no monogram data, may be a duplicate or "+
+					"may not belong to target language",
 				syms[i],
 			))
 		}
@@ -125,16 +94,7 @@ func main() {
 		)
 	}
 
-	// Filter out the excluded keys.
-	const nKeyAll = cfg.NumKeysAll
-	var keys [nSym]cfg.KeyT
-	for i, j := 0, 0; i < nKeyAll; i++ {
-		key := cfg.KeysAll[i]
-		if key.Fin != cfg.FingerNil {
-			keys[j] = key
-			j++
-		}
-	}
+	var keys = cfg.KeysIncluded
 
 	var layout [nSym]int // equals [0, 1, 2... numSymbols-1].
 	for i := range layout {
@@ -145,46 +105,37 @@ func main() {
 	// mapping of symbols to keys (it's a bijection). So to be clear, if
 	// layout[5] = 3, the 3rd key is mapped to the 5th symbol.
 
-	switch mode {
-	case "anneal":
-		{
+	msgChan := make(chan msg.ThreadMessageT, 100)
+	var wgPrint sync.WaitGroup
+	var wgWork sync.WaitGroup
+	wgPrint.Add(1)
+	go msg.PrintMessages(msgChan, &wgPrint)
 
-			msgChan := msg.MainChannel
-			var wgPrint sync.WaitGroup
-			var wgWork sync.WaitGroup
-			wgPrint.Add(1)
-			go msg.PrintMessages(msgChan, &wgPrint)
+	seed := uint64(time.Now().UnixNano())
+	for id := range runtime.NumCPU() {
 
-			seed := uint64(time.Now().UnixNano())
-			for id := range runtime.NumCPU() {
+		stream := uint64(id)
+		source := rand.NewPCG(seed, stream)
+		r := rand.New(source)
 
-				stream := uint64(id)
-				source := rand.NewPCG(seed, stream)
-				r := rand.New(source)
+		r.Shuffle(nSym, func(i, j int) {
+			layout[i], layout[j] = layout[j], layout[i]
+		})
 
-				r.Shuffle(nSym, func(i, j int) {
-					layout[i], layout[j] = layout[j], layout[i]
-				})
-
-				in := anneal.AnnealInputs{
-					Layout:     layout,
-					Keys:       keys,
-					MonoFreqs:  monoFreqs,
-					BiFreqs:    biFreqs,
-					Trigrams:   trigrams,
-					SymToTrigs: symToTrigs,
-				}
-
-				wgWork.Add(1)
-				go anneal.RunAnnealing(in, id, r, &wgWork)
-			}
-
-			wgWork.Wait()
-			close(msg.MainChannel)
-			wgPrint.Wait()
+		in := anneal.AnnealInputs{
+			Layout:     layout,
+			Keys:       keys,
+			MonoFreqs:  monoFreqs,
+			BiFreqs:    biFreqs,
+			Trigrams:   trigrams,
+			SymToTrigs: symToTrigs,
 		}
-	case "bruteforce": // W.I.P.
-		{
-		}
+
+		wgWork.Add(1)
+		go anneal.RunAnnealing(in, r, id, msgChan, &wgWork)
 	}
+
+	wgWork.Wait()
+	close(msgChan)
+	wgPrint.Wait()
 }
