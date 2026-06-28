@@ -2,7 +2,7 @@
 ## Introduction
 This is an optimization engine to find a near-optimal layout for a left-hand only Lily58 keyboard, using a Simulated Annealing (SA) algorithm that I wrote, prioritizing flow and hand comfort.
 
-Lily58 is a split keyboard that boasts 29 keys on each side (or 28 if you replace a certain key with a dial/knob). This engine cannot find you the best layout for the entire split; you can find other engines on the internet for that. Its goal is to strictly find the best layout on one side of the Lily58 by mapping the desired characters to the desired keys, using data I sourced for 39 languages.
+Lily58 is a split keyboard that boasts 29 keys on each side (or 28 if you replace a certain key with a dial/knob). This engine cannot find you the best layout for the entire split; you can find other engines on the internet for that. Its goal is to strictly find the best layout on one side of the Lily58 by mapping the desired characters to the desired keys, using data I sourced for 39 different languages.
 
 ## How to Install & Run
 1. You need [Go installed](https://go.dev/doc/install) to compile this program, and it must be version ``1.22`` or above. There are no other dependencies or go packages required.
@@ -16,7 +16,7 @@ cd lily58-anneal
 go build .
 ./lily58-anneal
 ```
-4. Wait for the engine to output it results. Should take less than a minute on an average, modern CPU. It will print messages in this form:
+4. Wait for the program to print the engine's results. Should take less than a minute on an average, modern CPU. It will print messages in this form:
 ```
 [SA Thread #4] Started SA run with initial score of 6.903992
 [SA Thread #2] Started SA run with initial score of 6.700186
@@ -38,14 +38,15 @@ go build .
 ...
 
 ```
+5. Assess the output. Note that the lower score, the better the layout (usually).
 
 ## Configuration & Limitations
-All configuration happens in the config file ``lily58-anneal/config/config.go``. This short [documentation](doc.md) lets you know what you can change. ``TL;DR:`` You can include or ignore any of the 29 keys available and assign which finger presses each key. However you cannot assign the thumb or pinky to any keys (reasons are in the documentation). You must choose a supported language and the symbols (letters) you choose to map must belong to the language (see section below).
+All configuration happens in the config file ``lily58-anneal/config/config.go``. This short [documentation](doc.md) lets you know what you can change. ``TL;DR:`` You can include or ignore any of the 29 keys available and assign which finger presses each key. However you cannot assign the thumb or pinky to any keys (reasons are in the documentation). You must choose a supported language and the symbols (letters) to map. Those symbols must belong to the language's alphabet (see section below).
 
 ## Supported Languages & Corresponding Symbols
 The engine currently supports 39 different languages with their corresponding symbols. Feel free to open an issue or to contact me if there's any confusion.
 
-| Language | Code | Symbols |
+| Language | Code | Alphabet |
 |-|-|-|
 | Afrikaans | af | abcdefghijklmnopqrstuvwxyzàáâèéêëîïôóúûü |
 | Bulgarian | bg | абвгдежзийклмнопрстуфхцчшщъьюя |

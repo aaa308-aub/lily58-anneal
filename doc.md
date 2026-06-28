@@ -18,7 +18,7 @@ A flat penalty (or weight) is applied to every key pressed, and that penalty inc
 
 ![](assets/images/lily58weights.png)
 
-This will make the Simulated Annealing (SA) algorithm naturally gravitate towards the center. The center is technically the key on the 3rd row, 3rd column, but pulled slightly upward to align with the fingers' natural "resting" position.\
+This will make the Simulated Annealing (SA) algorithm naturally gravitate towards the center. The center is technically the key on the row-column (3,3) as seen in the section above. But for these weights, I pulled the center slightly upward to align with the fingers' natural "resting" position.\
 You may wonder why I didn't just use the distances I've measured for this. It's because these distances can't capture the "feel" of your hand on each key, and I decoupled the logic of weights from distance for you to be able to easily change them to your liking.
 
 ## How to Configure to your Needs
@@ -50,12 +50,12 @@ const symbolsStr = "abcdefghijklmnopqrstuvwxyz"
 
 const TargetLanguageCode = "en"
 ```
-Note that all the other variables you see within ``config.go`` are not meant to be changed, but of course do whatever you want (if you know what you're doing!).
+Note that all the other variables you see within ``config.go`` are not meant to be changed, but of course, do whatever you want if you know what you're doing.
 
 ## Supported Languages & Corresponding Symbols
 The engine currently supports 39 different languages with their corresponding symbols. Feel free to open an issue or to contact me if there's any confusion.
 
-| Language | Code | Symbols |
+| Language | Code | Alphabet |
 |-|-|-|
 | Afrikaans | af | abcdefghijklmnopqrstuvwxyzàáâèéêëîïôóúûü |
 | Bulgarian | bg | абвгдежзийклмнопрстуфхцчшщъьюя |
@@ -96,3 +96,13 @@ The engine currently supports 39 different languages with their corresponding sy
 | Turkish | tr | abcçdefgğhıijklmnoöprsştuüvyz |
 | Ukrainian | uk | абвгґдеєжзиіїйคลмнопрстуфхцчшщьюя |
 | Vietnamese | vi | abcdefghijklmnopqrtuvwxyzaăâeêioôơuưyáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵđ |
+
+## How the Engine Works
+I want to keep the doc lean, so I'll only capture the ideas and not the math here.
+
+[Simulated Annealing](https://en.wikipedia.org/wiki/Simulated_annealing), in simple terms, is an algorithm that randomly walks a search space and tries to find its lowest or highest point -- in our case it's lowest. It has no intuition what the next step -- which is swapping two symbols by key -- should be, as it's completely random. Whenever it takes a step that results in a lower point/score, the new state resulting from that step is always accepted as the current state. If the step results in a higher (a worse) score, instead of rejecting the new state, a probability of acceptance is calculated. That *chance* is inversely proportional to the time elapsed since the algorithm began its run, and to how bad the difference of scores -- the new score minus the old score -- would be if the new state is accepted.
+
+In the ``assets/counts/`` folder, you'll see counts of n-grams from highest to lowest, for ``n = 1, 2, 3``. An n-gram is an ordered combination of ``n`` symbols.\
+Monograms are used to penalize layouts with high-frequency symbols, like ``e`` or ``t`` in English, placed far away from the keyboard center. Bigrams like ``he`` or ``in`` are for punishing keys pressed consecutively with the same finger or with excessive finger stretching (or both). Lastly, layouts where distinct fingers (like ``ring->middle->index`` or ``middle->ring->index``) are used to press some of the most frequent trigrams, like ``the`` or ``and`` in English, are rewarded with lower scores.
+
+There are other properties you *could* optimize for such as excessive alternation between the top and bottom rows, or to target more trigrams than what I've set (the top 64 trigrams), but the choices become more limited with a one-hand keyboard, since each property accounted for would make the search space more "rugged" than it already is. A more rugged space leads to generally worse results.
