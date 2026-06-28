@@ -1,5 +1,7 @@
 ## Default Configuration & Finger Assignment
-By default, the engine finds the best layout for my own left-hand only Lily58 to map 26 keys to the English alphabet. I have restricted the thumb to two keys only for Space and Enter and the pinky to one key only for Backspace. This means that the engine assigns only the Ring, Middle and Index fingers to these 26 keys, and while you can choose another set of keys and which finger presses what key, you cannot assign the pinky or thumb to any key -- the engine doesn't know about them. Here are the default finger assignments:
+By default, the engine finds the best layout for my own left-hand only Lily58 to map 26 keys to the English alphabet. On my Lily58, I restricted the thumb to two keys only for ``Space`` and ``Enter`` and the pinky to one key only for ``Backspace``. This means that the engine assigns only the Ring, Middle and Index fingers to these 26 keys, and while you can choose another set of keys and which finger presses what key, you cannot assign the pinky or thumb to any key -- the engine doesn't know about them. This was a deliberate design choice I made seeing how weak the pinky is, and how the thumb runs on entirely different musculature than the rest of the fingers (and is typically used to assist typing with ``Space``/``Enter``).
+
+Here are the default finger assignments:
 
 ![](assets/images/lily58fingers.png)
 
