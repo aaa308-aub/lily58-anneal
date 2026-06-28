@@ -44,17 +44,7 @@ type AnnealInputs struct {
 
 // Excluded keys are not part of this LUT.
 var distsSq = func() [nSym][nSym]float32 {
-
-	// Filter out excluded keys first.
-	var keys [nSym]keyT
-	for i, j := 0, 0; i < cfg.NumKeysAll; i++ {
-		key := cfg.KeysAll[i]
-		if key.Fin != cfg.FingerNil {
-			keys[j] = key
-			j++
-		}
-	}
-
+	var keys = cfg.KeysIncluded
 	var lut [nSym][nSym]float32
 	for i := range nSym {
 		for j := range nSym {
