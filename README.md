@@ -4,6 +4,8 @@ This is an optimization engine to find a near-optimal layout for a left-hand onl
 
 Lily58 is a split keyboard that boasts 29 keys on each side (or 28 if you replace a certain key with a dial/knob). This engine cannot find you the best layout for the entire split; you can find other engines on the internet for that. Its goal is to strictly find the best layout on one side of the Lily58 by mapping the desired characters to the desired keys, using data I sourced for 39 different languages.
 
+Check out [a prototype I've made from this here](https://github.com/aaa308-aub/Lily29).
+
 ## How to Install & Run
 1. You need [Go installed](https://go.dev/doc/install) to compile this program, and it must be version ``1.22`` or above. There are no other dependencies or go packages required.
 2. Open a terminal in your desired folder and clone the repository (which will create a parent folder inside named ``lily58-anneal``):
