@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"unicode"
 )
 
@@ -104,9 +105,13 @@ const symbolsStr = "abcdefghijklmnopqrstuvwxyz"
 
 // For the available languages and their alphabets, see the README.
 
-const TargetLanguageCode = "en"
+const TargetLanguageCode = "rr"
 
 // Don't touch below this line unless you know what you're doing.
+
+type keyCoords struct {
+	x, y float32
+}
 
 var SymbolsArr = func() [NumSymbols]rune {
 	var arr [NumSymbols]rune
@@ -126,34 +131,47 @@ var KeysIncluded = func() [NumSymbols]KeyT {
 	}
 
 	if nKeysIncluded < 3 || nKeysIncluded > 29 {
-		panic(fmt.Errorf(
-			"number of included keys (%d) must be between 3 and 29 inclusive",
+		fmt.Fprintf(
+			os.Stderr,
+			"number of included keys (%d) must be between 3 and 29 inclusive\n",
 			nKeysIncluded,
-		))
+		)
+		os.Exit(1)
 	}
 
 	if nKeysIncluded != NumSymbols {
-		panic(fmt.Errorf(
-			"number of included keys (%d) is different from number of symbols (%d)",
+		fmt.Fprintf(
+			os.Stderr,
+			"number of included keys (%d) is different from number of "+
+				"symbols (%d)\n",
 			nKeysIncluded,
 			NumSymbols,
-		))
+		)
+		os.Exit(1)
 	}
 
-	seen := make(map[KeyT]struct{}, NumSymbols)
+	seen := make(
+		map[keyCoords]struct{},
+		NumSymbols,
+	)
 
 	var keys [NumSymbols]KeyT
 	for i, j := 0, 0; i < NumKeysAll; i++ {
 		key := KeysAll[i]
 		if key.Fin != FingerNil {
 
-			_, ok := seen[key]
+			coords := keyCoords{key.X, key.Y}
+			_, ok := seen[coords]
 			if ok {
-				panic("found two keys in config with identical fields")
+				fmt.Fprintln(
+					os.Stderr,
+					"found two keys in config with identical coordinates",
+				)
+				os.Exit(1)
 			}
 
 			keys[j] = key
-			seen[key] = struct{}{}
+			seen[coords] = struct{}{}
 			j++
 		}
 	}

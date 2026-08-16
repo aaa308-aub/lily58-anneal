@@ -37,7 +37,8 @@ func parseNgramLine(
 	parts := strings.Split(line, "\t")
 	if len(parts) != 2 {
 		return nil, 0, fmt.Errorf(
-			"found line (%d) in vetted data file with %d parts, expected only 2",
+			"found line (%d) in vetted data file with %d parts, expected "+
+				"only 2",
 			lineIdx,
 			len(parts),
 		)
@@ -46,7 +47,8 @@ func parseNgramLine(
 	runes := []rune(parts[0])
 	if len(runes) != nGramSize {
 		return nil, 0, fmt.Errorf(
-			"found line (%d) in vetted data file with a %d-rune n-gram, expected %d",
+			"found line (%d) in vetted data file with a %d-rune n-gram, "+
+				"expected %d",
 			lineIdx,
 			len(runes),
 			nGramSize,
@@ -81,7 +83,8 @@ func turnCountsToFreqs(counts, freqs []float32) error {
 
 	if total < 0 {
 		return fmt.Errorf(
-			"total count of n-grams is negative, overflow possible but unlikely cause",
+			"total count of n-grams is negative, overflow possible but " +
+				"unlikely cause",
 		)
 	}
 

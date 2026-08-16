@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"path"
 	"runtime"
 	"sync"
@@ -27,32 +28,30 @@ func main() {
 	var monoFreqs [nSym]float32
 	err := assets.GetMonogramData(filePath, syms[:], monoFreqs[:])
 	if err != nil {
-		panic(fmt.Errorf(
-			"failed to parse monogram data: %w",
-			err,
-		))
+		fmt.Fprintln(os.Stderr, "failed to parse monogram data:\n", err)
+		os.Exit(1)
 	}
 	for i, freq := range monoFreqs {
 		if freq == 0 {
-			panic(fmt.Errorf(
-				"found symbol (%q) with no monogram data, may be a duplicate or "+
-					"may not belong to target language",
+			fmt.Fprintf(
+				os.Stderr,
+				"found symbol (%q) with no monogram data, may be a duplicate "+
+					"in target symbols or may not belong to target language\n",
 				syms[i],
-			))
+			)
+			os.Exit(1)
 		}
 	}
 
 	var biFreqs [nSym][nSym]float32
 	{ // Closure hides biFreqsFlat.
 		filePath = path.Join("assets", "counts", "bigrams", fileName)
-		// Matrix biFreqs is flattened at first for easier coupling in assets.go.
+		// biFreqs is flattened at first for easier coupling in assets.go
 		var biFreqsFlat [nSym * nSym]float32
 		err = assets.GetBigramData(filePath, syms[:], biFreqsFlat[:])
 		if err != nil {
-			panic(fmt.Errorf(
-				"failed to parse bigram data: %w",
-				err,
-			))
+			fmt.Fprintln(os.Stderr, "failed to parse bigram data:\n", err)
+			os.Exit(1)
 		}
 
 		// Unflatten matrix and symmetrize it by aggregating (i,j) and (j,i).
@@ -82,10 +81,8 @@ func main() {
 			nTrigrams,
 		)
 		if err != nil {
-			panic(fmt.Errorf(
-				"failed to parse trigram data: %w",
-				err,
-			))
+			fmt.Fprintln(os.Stderr, "failed to parse trigram data:\n", err)
+			os.Exit(1)
 		}
 
 		assets.MapSymbolsToTrigrams(

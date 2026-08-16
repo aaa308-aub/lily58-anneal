@@ -94,7 +94,8 @@ func FormatLayout(layout *[nSym]int) string {
 		rows[rowIdx] = append(rows[rowIdx], "\n")
 	}
 
-	// I expanded the instructions to make them a bit more readable.
+	// I expanded the instructions below to make them a bit more readable.
+
 	numRows := len(rows)
 	oldRow := rows[numRows-1]
 	keyPosToMove := len(oldRow) - 2 // Before the newline.
