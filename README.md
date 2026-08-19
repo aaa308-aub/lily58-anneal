@@ -1,5 +1,6 @@
 # LILY58-ANNEAL
 ## Introduction
+
 This is an optimization engine to find a near-optimal layout for a left-hand only Lily58 keyboard, using a Simulated Annealing (SA) algorithm that I wrote, prioritizing flow and hand comfort.
 
 Lily58 is a split keyboard that boasts 29 keys on each side (or 28 if you replace a certain key with a dial/knob). This engine cannot find you the best layout for the entire split; you can find other engines on the internet for that. Its goal is to strictly find the best layout on one side of the Lily58 by mapping the desired characters to the desired keys, using data I sourced for 39 different languages.
@@ -7,6 +8,7 @@ Lily58 is a split keyboard that boasts 29 keys on each side (or 28 if you replac
 Check out [a prototype I've made from this here](https://github.com/aaa308-aub/Lily29).
 
 ## How to Install & Run
+
 1. You need [Go installed](https://go.dev/doc/install) to compile this program, and it must be version ``1.22`` or above. There are no other dependencies or go packages required.
 2. Open a terminal in your desired folder and clone the repository (which will create a parent folder inside named ``lily58-anneal``):
 ```
@@ -43,9 +45,11 @@ go build .
 5. Assess the output. Note that the lower score, the better the layout (usually).
 
 ## Configuration & Limitations
+
 All configuration happens in the config file ``lily58-anneal/config/config.go``. This short [documentation](doc.md) lets you know what you can change. ``TL;DR:`` You can include or ignore any of the 29 keys available and assign which finger presses each key. However you cannot assign the thumb or pinky to any keys (reasons are in the documentation). You must choose a supported language and the symbols (letters) to map. Those symbols must belong to the language's alphabet (see section below).
 
 ## Supported Languages & Corresponding Symbols
+
 The engine currently supports 39 different languages with their corresponding symbols. Feel free to open an issue or to contact me if there's any confusion.
 
 | Language | Code | Alphabet |
@@ -91,4 +95,5 @@ The engine currently supports 39 different languages with their corresponding sy
 | Vietnamese | vi | abcdefghijklmnopqrtuvwxyzaăâeêioôơuưyáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵđ |
 
 ## Special Thanks
+
 Getting only one half of the Lily58 keyboard without purchasing the whole split can be tricky, but [Typeractive](https://typeractive.xyz/) made it possible and I thank them dearly for their kindness and support for this project.

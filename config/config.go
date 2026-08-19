@@ -114,6 +114,7 @@ type keyCoords struct {
 }
 
 var SymbolsArr = func() [NumSymbols]rune {
+
 	var arr [NumSymbols]rune
 	for i, s := range symbolsStr {
 		arr[i] = unicode.ToLower(s)

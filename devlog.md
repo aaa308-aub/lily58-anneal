@@ -15,6 +15,7 @@ procedure of development (oldest ``Problem`` to newest). It follows the format:
 ...
 ```
 
+
 ``#1``\
 The right hand is heavily taxed with both typing on the keyboard and navigating\
 with the mouse, leading to excessive hand movement between the two and\
@@ -208,6 +209,7 @@ also deal with double-counting of bigrams containing both swapped symbols.\
 Although time is wasted processing the zero-entries, it is negligible and\
 arguably necessary for readability and maintenance.
 
+
 ``#10``\
 The solution proposed in ``#8`` wastes a lot of memory and introduces an issue\
 with double-counting trigrams which happen to contain both swapped symbols.
@@ -234,6 +236,7 @@ our engine, by simply taking the union of their ``symbolToTrigram`` entries\
 64 to use this solution. This might be better for the engine to prioritize the\
 trigrams that matter the most, anyway.
 
+
 ``#11``\
 ``WholeCostLayout`` of output layout does not match the cost (score) that is\
 being calculated by adding ``deltaCost`` every swap. There is a logical error\
@@ -248,6 +251,7 @@ problem ``#9``. ``WholeCostLayout`` is now almost equal to the output score,\
 with slight difference due to float32 rounding errors. I simply stopped adding\
 ``deltaCost`` to the score every swap (when it's accepted) because there's just\
 no need, and instead use ``WholeCostLayout``'s output to print the final score.
+
 
 ``#12``\
 After testing some layouts and relying on human intuition, I believe that\
