@@ -1,44 +1,25 @@
 package assets
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
 
-func openDataFile(filePath string) (*os.File, error) {
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open language data file: %w", err)
-	}
-	if filepath.Ext(filePath) != ".tsv" {
-		return nil, fmt.Errorf("target language data file must be a .tsv file")
-	}
-	return file, nil
-}
-
+// lineIdx is passed for specifying where an error occurs. Make sure to pass
+// lineIdx as one-indexed to match human debugging.
 func parseNgramLine(
 	line string,
 	lineIdx int,
 	nGramSize int,
 ) ([]rune, int, error) {
 
-	if line == "" {
-		return nil, 0, fmt.Errorf(
-			"found empty line (%d) in vetted data file outside of EOF",
-			lineIdx,
-		)
-	}
-
 	parts := strings.Split(line, "\t")
 	if len(parts) != 2 {
 		return nil, 0, fmt.Errorf(
 			"found line (%d) in vetted data file with %d parts, expected "+
-				"only 2",
+				"strictly 2",
 			lineIdx,
 			len(parts),
 		)
@@ -58,7 +39,7 @@ func parseNgramLine(
 	count, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return nil, 0, fmt.Errorf(
-			"failed to parse n-gram count via strconv.Atoi in line %d: %w",
+			"failed to parse n-gram count in line %d: %w",
 			lineIdx,
 			err,
 		)
@@ -101,26 +82,35 @@ func turnCountsToFreqs(counts, freqs []float32) error {
 	return nil
 }
 
+func readFileAsLines(path string) ([]string, error) {
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read language data file: %w", err)
+	}
+
+	// Remove any trailing empty lines. Empty lines in-between others are
+	// treated as faulty.
+	linesConcat := strings.TrimSpace(string(data))
+	lines := strings.Split(linesConcat, "\n")
+	return lines, nil
+}
+
 // Frequencies match symbols by index.
 func GetMonogramData(
-	filePath string,
+	path string,
 	syms []rune,
 	freqs []float32,
 ) error {
 
-	file, err := openDataFile(filePath)
+	lines, err := readFileAsLines(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-
-	scanner, lineIdx := bufio.NewScanner(file), 0
 	counts := make([]float32, len(freqs))
-	for scanner.Scan() {
-		lineIdx++
+	for lineIdx, line := range lines {
 
-		line := scanner.Text()
-		runes, count, err := parseNgramLine(line, lineIdx, 1)
+		runes, count, err := parseNgramLine(line, lineIdx+1, 1)
 		if err != nil {
 			return err
 		}
@@ -134,10 +124,6 @@ func GetMonogramData(
 		}
 	}
 
-	if err = scanner.Err(); err != nil {
-		return fmt.Errorf("non-EOF error encountered by scanner: %w", err)
-	}
-
 	err = turnCountsToFreqs(counts, freqs)
 	return err
 }
@@ -145,31 +131,25 @@ func GetMonogramData(
 // Slice of frequencies should view a flattened 2D LUT that
 // cross-tabulates slice of symbols with itself.
 func GetBigramData(
-	filePath string,
+	path string,
 	syms []rune,
 	freqs []float32,
 ) error {
 
-	file, err := openDataFile(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
 	nSym := len(syms)
-
 	symToIdx := make(map[rune]int, nSym)
 	for i, sym := range syms {
 		symToIdx[sym] = i
 	}
 
-	scanner, lineIdx := bufio.NewScanner(file), 0
+	lines, err := readFileAsLines(path)
+	if err != nil {
+		return err
+	}
 	counts := make([]float32, len(freqs))
-	for scanner.Scan() {
-		lineIdx++
+	for lineIdx, line := range lines {
 
-		line := scanner.Text()
-		runes, count, err := parseNgramLine(line, lineIdx, 2)
+		runes, count, err := parseNgramLine(line, lineIdx+1, 2)
 		if err != nil {
 			return err
 		}
@@ -184,50 +164,43 @@ func GetBigramData(
 		counts[idx] = float32(count)
 	}
 
-	if err = scanner.Err(); err != nil {
-		return fmt.Errorf("non-EOF error encountered by scanner: %w", err)
-	}
-
 	err = turnCountsToFreqs(counts, freqs)
 	return err
 }
 
-// Syms field should contain the symbols (by index) in their
-// order within trigram.
+// Syms field contains the symbols by index and in order within trigram.
 type TrigramT struct {
 	Freq float32
 	Syms [3]int8
 }
 
+// nTrigram is always passed as 64 for bitmasking optimization unless modified.
 func GetTrigramData(
-	filePath string,
+	path string,
 	syms []rune,
 	trigrams []TrigramT,
 	nTrigram int8,
 ) error {
 
-	file, err := openDataFile(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
 	nSym := len(syms)
-
 	symToIdx := make(map[rune]int8, nSym)
 	for i, symbol := range syms {
 		symToIdx[symbol] = int8(i)
 	}
 
+	lines, err := readFileAsLines(path)
+	if err != nil {
+		return err
+	}
 	trigramSyms := make([][3]int8, nTrigram)
 	counts := make([]float32, nTrigram)
 	countsIdx := int8(0) // lineIdx can't be used if some trigrams are skipped.
-	scanner, lineIdx := bufio.NewScanner(file), 0
-	for scanner.Scan() && countsIdx < nTrigram {
-		lineIdx++
+	for lineIdx, line := range lines {
+		if countsIdx >= nTrigram {
+			break
+		}
 
-		line := scanner.Text()
-		runes, count, err := parseNgramLine(line, lineIdx, 3)
+		runes, count, err := parseNgramLine(line, lineIdx+1, 3)
 		if err != nil {
 			return err
 		}
@@ -251,10 +224,6 @@ func GetTrigramData(
 	// Notice: the loop could theoretically and silently end before
 	// countsIdx reaches nTrigrams. It won't break the logic, just
 	// that the number of trigrams recorded is less than requested.
-
-	if err = scanner.Err(); err != nil {
-		return fmt.Errorf("non-EOF error encountered by scanner: %w", err)
-	}
 
 	freqs := make([]float32, len(counts))
 	err = turnCountsToFreqs(counts, freqs)

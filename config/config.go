@@ -105,7 +105,7 @@ const symbolsStr = "abcdefghijklmnopqrstuvwxyz"
 
 // For the available languages and their alphabets, see the README.
 
-const TargetLanguageCode = "rr"
+const TargetLanguageCode = "en"
 
 // Don't touch below this line unless you know what you're doing.
 
