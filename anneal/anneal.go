@@ -29,10 +29,13 @@ type trigramT = assets.TrigramT
 // All goroutines have their own copies of the data to prevent
 // fighting for it.
 //
-// Initially thought to be fixing maybe a cache contention issue or
-// pointer chasing -- turns out that the bottleneck was actually the
-// CPU's cache coherence protocol stalling the program because the
-// data is not seen as read-only.
+// Passing the parameters as a reference, even when treated as
+// read-only, increased execution time by ~15 seconds. Having
+// guaranteed that the problem wasn't pointer chasing, false
+// sharing, or cache coherence, I couldn't provably explain
+// what the problem really was and why this fix worked. A look
+// at the compiled assembly code may uncover that, or maybe
+// it's a quirk of my old Coffee Lake intel architecture.
 type AnnealInputs struct {
 	Layout     [nSym]int
 	Keys       [nSym]keyT
