@@ -65,7 +65,7 @@ The engine currently supports 39 different languages with their corresponding sy
 | Catalan | ca | abcdefghijklmnopqrstuvwxyzàçéèíïóòúü |
 | Czech | cs | abcdefghijklmnopqrstuvwxyzáčďéěíňóřšťúůýž |
 | Danish | da | abcdefghijklmnopqrstuvwxyzæøå |
-| German | de | abcdefghijklmnopqrstuvwxyzäëöß |
+| German | de | abcdefghijklmnopqrstuvwxyzäöüß |
 | Greek | el | αβγδεζηθικλμνξοπρστυφχψως |
 | English | en | abcdefghijklmnopqrstuvwxyz |
 | Esperanto | eo | abcdefghijklmnoprs-tuŭvzĉĝĥĵŝ |
